@@ -3,8 +3,17 @@ REST API client for interacting with the roster system
 """
 
 from typing import List, Dict, Any, Optional
-from datetime import date
+from datetime import date, datetime, timedelta
 import logging
+import requests
+from urllib.parse import urljoin
+
+from ..exceptions import (
+    APIError,
+    InvalidCategoryError,
+    InvalidDateRangeError,
+    APIValidationError
+)
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +29,30 @@ class RosterAPIClient:
     - Updating existing rosters
     """
 
+    # Valid category values (case-insensitive)
+    VALID_CATEGORIES = {'chinese', 'english', 'sundayschool'}
+
+    @staticmethod
+    def parse_date(date_string: str) -> date:
+        """
+        Parse an ISO date string to a date object
+
+        Args:
+            date_string: Date string in ISO format (YYYY-MM-DD)
+
+        Returns:
+            Parsed date object
+
+        Raises:
+            InvalidDateRangeError: If date string is malformed
+        """
+        if not date_string:
+            raise InvalidDateRangeError(f"Invalid date format: '{date_string}'. Expected YYYY-MM-DD")
+        try:
+            return datetime.fromisoformat(date_string).date()
+        except (ValueError, AttributeError, TypeError) as e:
+            raise InvalidDateRangeError(f"Invalid date format: '{date_string}'. Expected YYYY-MM-DD")
+
     def __init__(self, base_url: str, api_key: Optional[str] = None):
         """
         Initialize the API client
@@ -30,23 +63,92 @@ class RosterAPIClient:
         """
         self.base_url = base_url.rstrip('/')
         self.api_key = api_key
-        # TODO: Initialize HTTP client (e.g., requests session)
+        self.session = requests.Session()
+        if api_key:
+            self.session.headers['Authorization'] = f'Bearer {api_key}'
 
-    def get_events(self, start_date: date = None, end_date: date = None) -> List[Dict[str, Any]]:
+    def get_events(
+        self,
+        category: Optional[str] = None,
+        from_date: Optional[date] = None,
+        to_date: Optional[date] = None
+    ) -> List[Dict[str, Any]]:
         """
-        Retrieve events within a date range
+        Retrieve events within a date range and optional category filter
 
         Args:
-            start_date: Start date for filtering
-            end_date: End date for filtering
+            category: Service category filter (case-insensitive).
+                     Valid values: 'chinese', 'english', 'sundayschool'
+            from_date: Start date for filtering (inclusive). Defaults to today.
+            to_date: End date for filtering (inclusive). Defaults to today + 7 days.
 
         Returns:
             List of event dictionaries
+
+        Raises:
+            InvalidCategoryError: If category is invalid
+            InvalidDateRangeError: If date range is invalid
+            APIValidationError: If API returns 400 for validation errors
+            APIError: For other API errors
         """
-        # TODO: Implement API call
+        # Validate category if provided
+        if category is not None:
+            category_lower = category.lower().strip()
+            if category_lower not in self.VALID_CATEGORIES:
+                raise InvalidCategoryError(category, self.VALID_CATEGORIES)
+            category = category_lower
+
+        # Set default dates if not provided
+        if from_date is None:
+            from_date = date.today()
+        if to_date is None:
+            to_date = date.today() + timedelta(days=7)
+
+        # Validate date range
+        if from_date > to_date:
+            raise InvalidDateRangeError(
+                f"Invalid date range: 'from' date ({from_date}) must be before or equal to 'to' date ({to_date})",
+                from_date=from_date.isoformat(),
+                to_date=to_date.isoformat()
+            )
+
+        # Build query parameters
+        params = {
+            'from': from_date.isoformat(),
+            'to': to_date.isoformat()
+        }
+        if category:
+            params['category'] = category
+
+        # Make API request
         endpoint = f"{self.base_url}/api/events"
-        logger.info(f"Fetching events from {endpoint}")
-        return []
+        logger.info(f"Fetching events from {endpoint} with params: {params}")
+
+        try:
+            response = self.session.get(endpoint, params=params)
+
+            # Handle validation errors
+            if response.status_code == 400:
+                error_data = response.json() if response.text else {}
+                raise APIValidationError(
+                    message=error_data.get('message', 'Validation error'),
+                    validation_errors=error_data.get('errors', {})
+                )
+
+            # Raise for other HTTP errors
+            response.raise_for_status()
+
+            # Return the JSON response
+            return response.json()
+
+        except requests.exceptions.RequestException as e:
+            if isinstance(e, requests.exceptions.HTTPError):
+                raise APIError(
+                    message=f"API request failed: {str(e)}",
+                    status_code=e.response.status_code if e.response else None,
+                    response_data=e.response.json() if e.response and e.response.text else None
+                )
+            raise APIError(f"API request failed: {str(e)}")
 
     def get_event(self, event_id: int) -> Dict[str, Any]:
         """

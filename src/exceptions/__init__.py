@@ -6,7 +6,18 @@ from .roster_exceptions import (
     RosterException,
     ValidationError,
     APIError,
-    SchedulerError
+    SchedulerError,
+    InvalidCategoryError,
+    InvalidDateRangeError,
+    APIValidationError
 )
 
-__all__ = ['RosterException', 'ValidationError', 'APIError', 'SchedulerError']
+__all__ = [
+    'RosterException',
+    'ValidationError',
+    'APIError',
+    'SchedulerError',
+    'InvalidCategoryError',
+    'InvalidDateRangeError',
+    'APIValidationError'
+]
