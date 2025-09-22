@@ -1,0 +1,33 @@
+version: '3.8'
+
+services:
+  roster-mcp:
+    build: .
+    container_name: roster-mcp
+    environment:
+      - CONFIG_ENV=production
+    env_file:
+      - .env
+    volumes:
+      - ./logs:/app/logs
+      - ./config:/app/config
+    restart: unless-stopped
+    depends_on:
+      - db
+
+  db:
+    image: postgres:15-alpine
+    container_name: roster-mcp-db
+    environment:
+      POSTGRES_DB: roster_mcp
+      POSTGRES_USER: roster_user
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-roster_password}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
