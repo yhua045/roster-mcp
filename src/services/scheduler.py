@@ -3,8 +3,7 @@ Scheduling service for running roster generation at regular intervals
 """
 
 import logging
-from typing import Optional
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from .ai_agent import AIAgent, RosterGenerationRules
 from .ai_analyzer import AIAnalyzer
