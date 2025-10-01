@@ -60,3 +60,13 @@ class APIValidationError(APIError):
     def __init__(self, message: str, validation_errors: dict = None):
         super().__init__(message, status_code=400)
         self.validation_errors = validation_errors or {}
+
+
+class EventNotFoundError(APIError):
+    """Raised when a requested event/service is not found"""
+
+    def __init__(self, event_id: int, message: str = None):
+        if message is None:
+            message = f"Event with ID {event_id} not found"
+        super().__init__(message, status_code=404)
+        self.event_id = event_id

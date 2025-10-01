@@ -13,7 +13,9 @@ from src.exceptions import (
     InvalidCategoryError,
     InvalidDateRangeError,
     APIValidationError,
-    APIError
+    APIError,
+    EventNotFoundError,
+    ValidationError
 )
 
 
@@ -284,6 +286,314 @@ class TestDateParsing(unittest.TestCase):
                 with self.assertRaises(InvalidDateRangeError) as context:
                     RosterAPIClient.parse_date(invalid_date)
                 self.assertIn("Invalid date format", str(context.exception))
+
+
+class TestUpdateRosterAssignment(unittest.TestCase):
+    """Test update_roster_assignment method"""
+
+    def setUp(self):
+        """Set up test fixtures"""
+        self.base_url = "https://api.example.com"
+        self.client = RosterAPIClient(self.base_url)
+
+    @patch('src.services.roster_api_client.requests.Session.put')
+    def test_update_roster_assignment_success(self, mock_put):
+        """Test successful roster assignment update"""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "id": 1,
+            "date": "2022-10-02",
+            "role": "禱告會",
+            "name": "孟妍",
+            "serviceInfo": {
+                "id": 601,
+                "date": "2022-10-02"
+            }
+        }
+        mock_put.return_value = mock_response
+
+        result = self.client.update_roster_assignment(
+            service_info_id=601,
+            date="2022-10-02",
+            role="禱告會",
+            name="孟妍"
+        )
+
+        # Verify the request was made correctly
+        expected_payload = {
+            "date": "2022-10-02",
+            "role": "禱告會",
+            "name": "孟妍",
+            "serviceInfo": {
+                "id": 601,
+                "date": "2022-10-02"
+            }
+        }
+        mock_put.assert_called_once_with(
+            f"{self.base_url}/api/events",
+            json=expected_payload
+        )
+        self.assertEqual(result["role"], "禱告會")
+        self.assertEqual(result["name"], "孟妍")
+
+    @patch('src.services.roster_api_client.requests.Session.put')
+    def test_update_roster_assignment_with_full_service_info(self, mock_put):
+        """Test roster assignment update with complete serviceInfo"""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"success": True}
+        mock_put.return_value = mock_response
+
+        service_info = {
+            "id": 601,
+            "footnote": "聖餐主日/感恩主日",
+            "skipService": False,
+            "skipReason": "",
+            "date": "2022-10-02",
+            "category": "chinese"
+        }
+
+        result = self.client.update_roster_assignment(
+            service_info_id=601,
+            date="2022-10-02",
+            role="證道",
+            name="張三",
+            service_info=service_info
+        )
+
+        # Verify serviceInfo was passed through and category was normalized
+        call_args = mock_put.call_args
+        payload = call_args[1]['json']
+        self.assertEqual(payload['serviceInfo']['category'], 'chinese')
+
+    @patch('src.services.roster_api_client.requests.Session.put')
+    def test_update_roster_assignment_normalizes_whitespace(self, mock_put):
+        """Test that role and name whitespace is normalized"""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"success": True}
+        mock_put.return_value = mock_response
+
+        result = self.client.update_roster_assignment(
+            service_info_id=601,
+            date="2022-10-02",
+            role="  證道  ",
+            name="  張三  "
+        )
+
+        # Verify whitespace was stripped
+        call_args = mock_put.call_args
+        payload = call_args[1]['json']
+        self.assertEqual(payload['role'], '證道')
+        self.assertEqual(payload['name'], '張三')
+
+    def test_update_roster_assignment_invalid_service_info_id(self):
+        """Test validation error for invalid service_info_id"""
+        with self.assertRaises(ValidationError) as context:
+            self.client.update_roster_assignment(
+                service_info_id=None,
+                date="2022-10-02",
+                role="證道",
+                name="張三"
+            )
+        self.assertIn("service_info_id must be a valid integer", str(context.exception.errors))
+
+    def test_update_roster_assignment_invalid_date_format(self):
+        """Test validation error for invalid date format"""
+        with self.assertRaises(ValidationError) as context:
+            self.client.update_roster_assignment(
+                service_info_id=601,
+                date="2022/10/02",  # Wrong format
+                role="證道",
+                name="張三"
+            )
+        self.assertIn("date must be in ISO format", str(context.exception.errors))
+
+    def test_update_roster_assignment_empty_role(self):
+        """Test validation error for empty role"""
+        with self.assertRaises(ValidationError) as context:
+            self.client.update_roster_assignment(
+                service_info_id=601,
+                date="2022-10-02",
+                role="",
+                name="張三"
+            )
+        self.assertIn("role", str(context.exception.errors))
+
+    def test_update_roster_assignment_empty_name(self):
+        """Test validation error for empty name"""
+        with self.assertRaises(ValidationError) as context:
+            self.client.update_roster_assignment(
+                service_info_id=601,
+                date="2022-10-02",
+                role="證道",
+                name=""
+            )
+        self.assertIn("name", str(context.exception.errors))
+
+    def test_update_roster_assignment_whitespace_only_role(self):
+        """Test validation error for whitespace-only role"""
+        with self.assertRaises(ValidationError) as context:
+            self.client.update_roster_assignment(
+                service_info_id=601,
+                date="2022-10-02",
+                role="   ",
+                name="張三"
+            )
+        self.assertIn("role cannot be empty or whitespace only", str(context.exception.errors))
+
+    def test_update_roster_assignment_service_info_id_mismatch(self):
+        """Test validation error when service_info.id doesn't match parameter"""
+        service_info = {
+            "id": 999,  # Doesn't match
+            "date": "2022-10-02"
+        }
+
+        with self.assertRaises(ValidationError) as context:
+            self.client.update_roster_assignment(
+                service_info_id=601,
+                date="2022-10-02",
+                role="證道",
+                name="張三",
+                service_info=service_info
+            )
+        self.assertIn("service_info.id", str(context.exception))
+
+    def test_update_roster_assignment_date_mismatch(self):
+        """Test validation error when service_info.date doesn't match parameter"""
+        service_info = {
+            "id": 601,
+            "date": "2022-10-03"  # Doesn't match
+        }
+
+        with self.assertRaises(ValidationError) as context:
+            self.client.update_roster_assignment(
+                service_info_id=601,
+                date="2022-10-02",
+                role="證道",
+                name="張三",
+                service_info=service_info
+            )
+        self.assertIn("service_info.date", str(context.exception))
+
+    def test_update_roster_assignment_invalid_category(self):
+        """Test validation error for invalid category"""
+        service_info = {
+            "id": 601,
+            "date": "2022-10-02",
+            "category": "invalid"
+        }
+
+        with self.assertRaises(InvalidCategoryError) as context:
+            self.client.update_roster_assignment(
+                service_info_id=601,
+                date="2022-10-02",
+                role="證道",
+                name="張三",
+                service_info=service_info
+            )
+        self.assertEqual(context.exception.category, "invalid")
+
+    @patch('src.services.roster_api_client.requests.Session.put')
+    def test_update_roster_assignment_404_error(self, mock_put):
+        """Test 404 error when service not found"""
+        mock_response = Mock()
+        mock_response.status_code = 404
+        mock_response.text = '{"message": "Service not found"}'
+        mock_response.json.return_value = {"message": "Service not found"}
+        mock_put.return_value = mock_response
+
+        with self.assertRaises(EventNotFoundError) as context:
+            self.client.update_roster_assignment(
+                service_info_id=999,
+                date="2022-10-02",
+                role="證道",
+                name="張三"
+            )
+
+        error = context.exception
+        self.assertEqual(error.event_id, 999)
+        self.assertEqual(error.status_code, 404)
+        self.assertIn("not found", str(error))
+
+    @patch('src.services.roster_api_client.requests.Session.put')
+    def test_update_roster_assignment_400_validation_error(self, mock_put):
+        """Test 400 validation error from API"""
+        mock_response = Mock()
+        mock_response.status_code = 400
+        mock_response.text = '{"message": "Invalid request", "errors": {"role": "Invalid role"}}'
+        mock_response.json.return_value = {
+            "message": "Invalid request",
+            "errors": {"role": "Invalid role"}
+        }
+        mock_put.return_value = mock_response
+
+        with self.assertRaises(APIValidationError) as context:
+            self.client.update_roster_assignment(
+                service_info_id=601,
+                date="2022-10-02",
+                role="InvalidRole",
+                name="張三"
+            )
+
+        error = context.exception
+        self.assertEqual(error.status_code, 400)
+        self.assertEqual(error.validation_errors, {"role": "Invalid role"})
+
+    @patch('src.services.roster_api_client.requests.Session.put')
+    def test_update_roster_assignment_500_error(self, mock_put):
+        """Test 500 server error"""
+        mock_response = Mock()
+        mock_response.status_code = 500
+        mock_response.text = '{"error": "Internal server error"}'
+        mock_response.json.return_value = {"error": "Internal server error"}
+        mock_response.raise_for_status.side_effect = requests.exceptions.HTTPError(
+            response=mock_response
+        )
+        mock_put.return_value = mock_response
+
+        with self.assertRaises(APIError) as context:
+            self.client.update_roster_assignment(
+                service_info_id=601,
+                date="2022-10-02",
+                role="證道",
+                name="張三"
+            )
+
+        error = context.exception
+        self.assertEqual(error.status_code, 500)
+
+    @patch('src.services.roster_api_client.requests.Session.put')
+    def test_update_roster_assignment_network_error(self, mock_put):
+        """Test network error handling"""
+        mock_put.side_effect = requests.exceptions.ConnectionError("Network error")
+
+        with self.assertRaises(APIError) as context:
+            self.client.update_roster_assignment(
+                service_info_id=601,
+                date="2022-10-02",
+                role="證道",
+                name="張三"
+            )
+
+        error = context.exception
+        self.assertIn("Network error", str(error))
+
+    def test_update_roster_assignment_multiple_validation_errors(self):
+        """Test that multiple validation errors are collected"""
+        with self.assertRaises(ValidationError) as context:
+            self.client.update_roster_assignment(
+                service_info_id=None,  # Invalid
+                date="invalid-date",   # Invalid
+                role="",               # Invalid
+                name=None              # Invalid
+            )
+
+        errors = context.exception.errors
+        self.assertGreater(len(errors), 1)
+        self.assertTrue(any("service_info_id" in str(e) for e in errors))
+        self.assertTrue(any("date" in str(e) for e in errors))
 
 
 if __name__ == "__main__":
