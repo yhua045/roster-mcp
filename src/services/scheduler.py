@@ -3,8 +3,11 @@ Scheduling service for running roster generation at regular intervals
 """
 
 import logging
-from typing import Optional
-from datetime import datetime, timedelta
+from datetime import datetime
+
+from .ai_agent import AIAgent, RosterGenerationRules
+from .ai_analyzer import AIAnalyzer
+from .roster_api_client import RosterAPIClient
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +31,25 @@ class SchedulerService:
         """
         self.settings = settings
         self.is_running = False
+
+        # Initialize API client and AI components
+        self.api_client = RosterAPIClient(
+            base_url=settings.api_base_url, api_key=settings.api_key
+        )
+        self.ai_analyzer = AIAnalyzer()
+
+        # Initialize roster generation rules from settings
+        self.rules = RosterGenerationRules(
+            max_assignments_per_person_per_month=settings.max_assignments_per_month,
+            min_rest_days_between_assignments=settings.min_rest_days,
+            prefer_role_rotation=settings.prefer_role_rotation,
+        )
+
+        # Initialize AI Agent
+        self.ai_agent = AIAgent(
+            api_client=self.api_client, ai_analyzer=self.ai_analyzer, rules=self.rules
+        )
+
         # TODO: Initialize scheduler (e.g., APScheduler, cron)
 
     def start(self):
@@ -67,18 +89,36 @@ class SchedulerService:
         logger.info("Starting roster generation task")
 
         try:
-            # TODO: Implement roster generation workflow
-            # 1. Get historical events from API
-            # 2. Run AI analysis
-            # 3. Generate roster recommendations
-            # 4. Validate generated roster
-            # 5. Submit to API
+            # Execute roster generation through AI Agent
+            results = self.ai_agent.execute_roster_generation(
+                months_ahead=self.settings.future_months,
+                category=None,  # Generate for all categories
+                dry_run=self.settings.dry_run_mode,
+            )
 
-            logger.info("Roster generation completed successfully")
+            # Log results
+            logger.info(
+                f"Roster generation completed: "
+                f"status={results['status']}, "
+                f"generated={results['generated_count']}, "
+                f"validated={results['validated_count']}, "
+                f"submitted={results['submitted_count']}"
+            )
+
+            # Log any errors or warnings
+            if results["errors"]:
+                for error in results["errors"]:
+                    logger.error(f"Generation error: {error}")
+
+            if results["warnings"]:
+                for warning in results["warnings"]:
+                    logger.warning(f"Generation warning: {warning}")
+
+            return results
 
         except Exception as e:
-            logger.error(f"Roster generation failed: {e}")
-            # TODO: Handle errors and potentially retry
+            logger.error(f"Roster generation failed: {e}", exc_info=True)
+            raise
 
     def schedule_one_time_task(self, run_at: datetime, task_name: str):
         """
