@@ -9,7 +9,8 @@ from .roster_exceptions import (
     SchedulerError,
     InvalidCategoryError,
     InvalidDateRangeError,
-    APIValidationError
+    APIValidationError,
+    EventNotFoundError
 )
 
 __all__ = [
@@ -19,5 +20,6 @@ __all__ = [
     'SchedulerError',
     'InvalidCategoryError',
     'InvalidDateRangeError',
-    'APIValidationError'
+    'APIValidationError',
+    'EventNotFoundError'
 ]

@@ -68,3 +68,22 @@ def normalize_category(category: str) -> str:
         Normalized category
     """
     return category.lower().strip() if category else ""
+
+
+def sanitize_name(name: str) -> str:
+    """
+    Sanitize and normalize a person's name
+
+    Args:
+        name: Name string to sanitize
+
+    Returns:
+        Sanitized name with normalized whitespace
+    """
+    if not name:
+        return ""
+
+    # Normalize whitespace: strip leading/trailing and collapse internal whitespace
+    import re
+    normalized = re.sub(r'\s+', ' ', name.strip())
+    return normalized
