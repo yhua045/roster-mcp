@@ -38,6 +38,17 @@ class Settings:
     dry_run_mode: bool = os.getenv("DRY_RUN", "false").lower() == "true"
     auto_approve_rosters: bool = os.getenv("AUTO_APPROVE", "false").lower() == "true"
 
+    # AI Agent Configuration
+    historical_months: int = int(os.getenv("HISTORICAL_MONTHS", "3"))
+    future_months: int = int(os.getenv("FUTURE_MONTHS", "3"))
+
+    # Roster Generation Rules
+    max_assignments_per_month: int = int(os.getenv("MAX_ASSIGNMENTS_PER_MONTH", "4"))
+    min_rest_days: int = int(os.getenv("MIN_REST_DAYS", "7"))
+    prefer_role_rotation: bool = (
+        os.getenv("PREFER_ROLE_ROTATION", "true").lower() == "true"
+    )
+
     @classmethod
     def from_yaml(cls, config_file: str):
         """

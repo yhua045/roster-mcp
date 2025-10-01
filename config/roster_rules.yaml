@@ -1,0 +1,93 @@
+# Roster Generation Rules Configuration
+# 
+# This file defines the rules and constraints that guide the AI Agent
+# in generating optimal rosters for church services.
+
+# Workload Balancing Rules
+# -------------------------
+# Maximum number of times a person can be assigned in a single month
+max_assignments_per_month: 4
+
+# Minimum days of rest required between consecutive assignments
+min_rest_days: 7
+
+# Role Distribution Rules
+# -----------------------
+# Whether to prefer rotating people through different roles
+prefer_role_rotation: true
+
+# Allow a person to have multiple roles on the same day
+allow_multiple_roles_same_day: false
+
+# Team Composition Rules
+# ----------------------
+# Try to maintain successful team combinations
+maintain_team_chemistry: true
+
+# Balance experienced and less-experienced members
+balance_experience_levels: true
+
+# Availability Rules
+# ------------------
+# Always respect member availability preferences
+respect_member_availability: true
+
+# Minimum number of people required for a service
+require_minimum_team_size: 3
+
+# Service Type Specific Preferences
+# ----------------------------------
+service_type_preferences:
+  chinese:
+    # Preferred roles for Chinese service
+    required_roles:
+      - "證道"  # Preaching
+      - "司會"  # Host
+      - "詩歌讚美"  # Worship
+      - "禱告會"  # Prayer meeting
+    preferred_team_size: 5
+  
+  english:
+    # Preferred roles for English service
+    required_roles:
+      - "Preaching"
+      - "Host"
+      - "Worship Leader"
+      - "Prayer"
+    preferred_team_size: 5
+  
+  sundayschool:
+    # Preferred roles for Sunday School
+    required_roles:
+      - "Teacher"
+      - "Assistant"
+    preferred_team_size: 2
+
+# AI Decision Making Weights
+# ---------------------------
+# These weights determine how the AI prioritizes different factors
+# when generating rosters. All weights must sum to 1.0.
+
+# Weight for balancing workload across members
+workload_balance_weight: 0.3
+
+# Weight for ensuring all roles are covered
+role_coverage_weight: 0.3
+
+# Weight for maintaining good team chemistry
+team_chemistry_weight: 0.2
+
+# Weight for respecting member availability
+availability_weight: 0.2
+
+# Advanced Options
+# ----------------
+# Number of alternative rosters to generate for comparison
+generate_alternatives: 3
+
+# Whether to learn from past roster performance
+enable_learning: true
+
+# Confidence threshold for auto-approval (0.0 to 1.0)
+# Rosters with confidence below this will require manual review
+auto_approve_confidence_threshold: 0.8
