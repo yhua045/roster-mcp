@@ -256,14 +256,14 @@ class SqliteExecutionStore(ExecutionStore):
         # Create indexes
         cursor.execute(
             """
-            CREATE INDEX IF NOT EXISTS idx_executions_started_at 
+            CREATE INDEX IF NOT EXISTS idx_executions_started_at
             ON executions(started_at)
         """
         )
 
         cursor.execute(
             """
-            CREATE INDEX IF NOT EXISTS idx_executions_status 
+            CREATE INDEX IF NOT EXISTS idx_executions_status
             ON executions(status)
         """
         )
