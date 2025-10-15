@@ -1,284 +1,472 @@
 """
-Tests for the AI Agent service
+Unit tests for AIAgent
 """
 
-import pytest
+import unittest
+from unittest.mock import Mock
 from datetime import date, timedelta
-from unittest.mock import Mock, MagicMock, patch
+import json
+import uuid
 
-from src.services.ai_agent import AIAgent, RosterGenerationRules
+from src.services.ai_agent import AIAgent
 from src.services.roster_api_client import RosterAPIClient
-from src.services.ai_analyzer import AIAnalyzer
+from src.exceptions import InvalidCategoryError, APIError
 
 
-class TestRosterGenerationRules:
-    """Tests for RosterGenerationRules configuration"""
+class TestAIAgentInit(unittest.TestCase):
+    """Test AIAgent initialization"""
 
-    def test_default_rules(self):
-        """Test that default rules are created correctly"""
-        rules = RosterGenerationRules()
+    def test_init(self):
+        """Test AIAgent initialization with API client"""
+        mock_client = Mock(spec=RosterAPIClient)
+        agent = AIAgent(mock_client)
+        self.assertEqual(agent.api_client, mock_client)
 
-        assert rules.max_assignments_per_person_per_month == 4
-        assert rules.min_rest_days_between_assignments == 7
-        assert rules.prefer_role_rotation is True
-        assert rules.require_minimum_team_size == 3
 
-    def test_custom_rules(self):
-        """Test creating rules with custom values"""
-        rules = RosterGenerationRules(
-            max_assignments_per_person_per_month=5,
-            min_rest_days_between_assignments=10,
-            prefer_role_rotation=False,
+class TestFetchLastThreeMonths(unittest.TestCase):
+    """Test fetch_last_three_months method"""
+
+    def setUp(self):
+        """Set up test fixtures"""
+        self.mock_client = Mock(spec=RosterAPIClient)
+        self.agent = AIAgent(self.mock_client)
+
+    def test_fetch_last_three_months_no_category(self):
+        """Test fetching events without category filter"""
+        mock_events = [
+            {"id": 1, "date": "2024-01-01"},
+            {"id": 2, "date": "2024-01-08"}
+        ]
+        self.mock_client.get_events.return_value = mock_events
+
+        result = self.agent.fetch_last_three_months()
+
+        # Verify correct date range (today - 90 days to today)
+        today = date.today()
+        from_date = today - timedelta(days=90)
+
+        self.mock_client.get_events.assert_called_once_with(
+            category=None,
+            from_date=from_date,
+            to_date=today
         )
+        self.assertEqual(result, mock_events)
 
-        assert rules.max_assignments_per_person_per_month == 5
-        assert rules.min_rest_days_between_assignments == 10
-        assert rules.prefer_role_rotation is False
+    def test_fetch_last_three_months_with_category(self):
+        """Test fetching events with category filter"""
+        mock_events = [
+            {"id": 1, "date": "2024-01-01", "category": "chinese"},
+            {"id": 2, "date": "2024-01-08", "category": "chinese"}
+        ]
+        self.mock_client.get_events.return_value = mock_events
 
-    def test_validate_rules_success(self):
-        """Test validation passes for valid rules"""
-        rules = RosterGenerationRules()
-        rules.validate()  # Should not raise
-
-    def test_validate_rules_invalid_max_assignments(self):
-        """Test validation fails for invalid max assignments"""
-        rules = RosterGenerationRules(max_assignments_per_person_per_month=0)
-
-        with pytest.raises(
-            ValueError, match="max_assignments_per_person_per_month must be at least 1"
-        ):
-            rules.validate()
-
-    def test_validate_rules_negative_rest_days(self):
-        """Test validation fails for negative rest days"""
-        rules = RosterGenerationRules(min_rest_days_between_assignments=-1)
-
-        with pytest.raises(
-            ValueError, match="min_rest_days_between_assignments cannot be negative"
-        ):
-            rules.validate()
-
-    def test_validate_rules_invalid_weights(self):
-        """Test validation fails when weights don't sum to 1.0"""
-        rules = RosterGenerationRules(
-            workload_balance_weight=0.5,
-            role_coverage_weight=0.5,
-            team_chemistry_weight=0.5,
-            availability_weight=0.5,
-        )
-
-        with pytest.raises(ValueError, match="Priority weights must sum to 1.0"):
-            rules.validate()
-
-
-class TestAIAgent:
-    """Tests for the AI Agent"""
-
-    @pytest.fixture
-    def mock_api_client(self):
-        """Create a mock API client"""
-        client = Mock(spec=RosterAPIClient)
-        return client
-
-    @pytest.fixture
-    def mock_ai_analyzer(self):
-        """Create a mock AI analyzer"""
-        analyzer = Mock(spec=AIAnalyzer)
-        return analyzer
-
-    @pytest.fixture
-    def ai_agent(self, mock_api_client, mock_ai_analyzer):
-        """Create an AI Agent instance for testing"""
-        return AIAgent(
-            api_client=mock_api_client,
-            ai_analyzer=mock_ai_analyzer,
-            rules=RosterGenerationRules(),
-        )
-
-    def test_init(self, mock_api_client, mock_ai_analyzer):
-        """Test AI Agent initialization"""
-        agent = AIAgent(api_client=mock_api_client, ai_analyzer=mock_ai_analyzer)
-
-        assert agent.api_client == mock_api_client
-        assert agent.ai_analyzer == mock_ai_analyzer
-        assert isinstance(agent.rules, RosterGenerationRules)
-
-    def test_init_with_custom_rules(self, mock_api_client, mock_ai_analyzer):
-        """Test AI Agent initialization with custom rules"""
-        custom_rules = RosterGenerationRules(max_assignments_per_person_per_month=5)
-
-        agent = AIAgent(
-            api_client=mock_api_client, ai_analyzer=mock_ai_analyzer, rules=custom_rules
-        )
-
-        assert agent.rules.max_assignments_per_person_per_month == 5
-
-    def test_init_validates_rules(self, mock_api_client, mock_ai_analyzer):
-        """Test that invalid rules are caught during initialization"""
-        invalid_rules = RosterGenerationRules(max_assignments_per_person_per_month=0)
-
-        with pytest.raises(ValueError):
-            AIAgent(
-                api_client=mock_api_client,
-                ai_analyzer=mock_ai_analyzer,
-                rules=invalid_rules,
-            )
-
-    def test_fetch_historical_data(self, ai_agent, mock_api_client):
-        """Test fetching historical roster data"""
-        # Mock the API response
-        mock_events = [{"id": 1, "date": "2024-01-01"}, {"id": 2, "date": "2024-01-08"}]
-        mock_api_client.get_events.return_value = mock_events
-
-        # Fetch historical data
-        result = ai_agent.fetch_historical_data(months_back=3)
-
-        # Verify API was called with correct date range
-        assert mock_api_client.get_events.called
-        call_args = mock_api_client.get_events.call_args
-
-        assert call_args[1]["category"] is None
-        assert isinstance(call_args[1]["from_date"], date)
-        assert isinstance(call_args[1]["to_date"], date)
-
-        # Verify date range is approximately 3 months
-        date_diff = call_args[1]["to_date"] - call_args[1]["from_date"]
-        assert 80 <= date_diff.days <= 100  # ~3 months
-
-        # Verify result
-        assert result == mock_events
-
-    def test_fetch_historical_data_with_category(self, ai_agent, mock_api_client):
-        """Test fetching historical data with category filter"""
-        mock_events = [{"id": 1, "date": "2024-01-01"}]
-        mock_api_client.get_events.return_value = mock_events
-
-        result = ai_agent.fetch_historical_data(months_back=2, category="chinese")
+        result = self.agent.fetch_last_three_months(category="chinese")
 
         # Verify category was passed
-        call_args = mock_api_client.get_events.call_args
-        assert call_args[1]["category"] == "chinese"
+        today = date.today()
+        from_date = today - timedelta(days=90)
 
-    def test_fetch_historical_data_api_error(self, ai_agent, mock_api_client):
-        """Test handling of API errors when fetching historical data"""
-        mock_api_client.get_events.side_effect = Exception("API Error")
+        self.mock_client.get_events.assert_called_once_with(
+            category="chinese",
+            from_date=from_date,
+            to_date=today
+        )
+        self.assertEqual(result, mock_events)
 
-        with pytest.raises(Exception, match="API Error"):
-            ai_agent.fetch_historical_data()
+    def test_fetch_last_three_months_empty_result(self):
+        """Test fetching events with empty result"""
+        self.mock_client.get_events.return_value = []
 
-    def test_validate_generated_roster(self, ai_agent, mock_ai_analyzer):
-        """Test roster validation"""
-        roster = {
-            "date": "2024-03-01",
-            "recommendations": [
-                {"name": "John", "role": "Host"},
-                {"name": "Jane", "role": "Worship"},
-            ],
-        }
+        result = self.agent.fetch_last_three_months()
 
-        mock_ai_analyzer.validate_roster.return_value = {
-            "is_valid": True,
-            "errors": [],
-            "warnings": [],
-        }
+        self.assertEqual(result, [])
 
-        result = ai_agent.validate_generated_roster(roster)
+    def test_fetch_last_three_months_invalid_category(self):
+        """Test that invalid category raises error"""
+        self.mock_client.get_events.side_effect = InvalidCategoryError(
+            "invalid",
+            {'chinese', 'english', 'sundayschool'}
+        )
 
-        assert result["is_valid"] is True
-        assert mock_ai_analyzer.validate_roster.called
+        with self.assertRaises(InvalidCategoryError):
+            self.agent.fetch_last_three_months(category="invalid")
 
-    def test_validate_generated_roster_minimum_team_size(
-        self, ai_agent, mock_ai_analyzer
-    ):
-        """Test validation adds warning for undersized teams"""
-        roster = {
-            "date": "2024-03-01",
-            "recommendations": [{"name": "John", "role": "Host"}],
-        }
+    def test_fetch_last_three_months_api_error(self):
+        """Test that API errors are propagated"""
+        self.mock_client.get_events.side_effect = APIError("Network error")
 
-        mock_ai_analyzer.validate_roster.return_value = {
-            "is_valid": True,
-            "errors": [],
-            "warnings": [],
-        }
+        with self.assertRaises(APIError):
+            self.agent.fetch_last_three_months()
 
-        result = ai_agent.validate_generated_roster(roster)
+    def test_fetch_last_three_months_date_range(self):
+        """Test that the date range is exactly 90 days"""
+        self.mock_client.get_events.return_value = []
 
-        # Should add warning about team size
-        assert len(result["warnings"]) > 0
-        assert "minimum team size" in result["warnings"][0]
+        self.agent.fetch_last_three_months()
 
-    def test_generate_future_rosters(self, ai_agent, mock_api_client, mock_ai_analyzer):
-        """Test generating future rosters"""
-        # Mock historical data
-        mock_api_client.get_events.return_value = [{"id": 1, "date": "2024-01-01"}]
+        # Verify the call
+        call_args = self.mock_client.get_events.call_args
+        from_date = call_args[1]['from_date']
+        to_date = call_args[1]['to_date']
 
-        # Mock analysis
-        mock_ai_analyzer.analyze_historical_patterns.return_value = {
-            "total_events": 1,
-            "member_frequency": {},
-        }
+        # Check it's exactly 90 days
+        delta = to_date - from_date
+        self.assertEqual(delta.days, 90)
 
-        # Mock recommendations
-        mock_ai_analyzer.generate_roster_recommendations.return_value = [
-            {"name": "John", "role": "Host"}
+        # Check to_date is today
+        self.assertEqual(to_date, date.today())
+
+
+class TestEvaluateAvailabilityPlaceholder(unittest.TestCase):
+    """Test evaluate_availability_placeholder method"""
+
+    def setUp(self):
+        """Set up test fixtures"""
+        self.mock_client = Mock(spec=RosterAPIClient)
+        self.agent = AIAgent(self.mock_client)
+
+    def test_evaluate_availability_placeholder_basic(self):
+        """Test placeholder availability with basic member list"""
+        members = [
+            {"name": "張三", "role": "證道"},
+            {"name": "李四", "role": "司會"}
         ]
 
-        # Generate rosters
-        result = ai_agent.generate_future_rosters(months_ahead=1)
+        result = self.agent.evaluate_availability_placeholder(members)
 
-        # Verify process
-        assert mock_api_client.get_events.called
-        assert mock_ai_analyzer.analyze_historical_patterns.called
-        assert isinstance(result, list)
+        # Check structure
+        self.assertEqual(result["status"], "placeholder")
+        self.assertIn("evaluation_date", result)
+        self.assertIn("members", result)
 
-    def test_execute_roster_generation_success(
-        self, ai_agent, mock_api_client, mock_ai_analyzer
-    ):
-        """Test successful execution of roster generation workflow"""
-        # Mock all dependencies
-        mock_api_client.get_events.return_value = []
-        mock_ai_analyzer.analyze_historical_patterns.return_value = {}
-        mock_ai_analyzer.generate_roster_recommendations.return_value = []
-        mock_ai_analyzer.validate_roster.return_value = {
-            "is_valid": True,
-            "errors": [],
-            "warnings": [],
+        # Check that all members are included
+        self.assertIn("張三", result["members"])
+        self.assertIn("李四", result["members"])
+
+        # Check default availability
+        self.assertTrue(result["members"]["張三"]["available"])
+        self.assertTrue(result["members"]["李四"]["available"])
+
+    def test_evaluate_availability_placeholder_deterministic(self):
+        """Test that placeholder returns deterministic results"""
+        members = [
+            {"name": "張三", "role": "證道"}
+        ]
+
+        result1 = self.agent.evaluate_availability_placeholder(members)
+        result2 = self.agent.evaluate_availability_placeholder(members)
+
+        # Both should mark members as available
+        self.assertEqual(
+            result1["members"]["張三"]["available"],
+            result2["members"]["張三"]["available"]
+        )
+
+    def test_evaluate_availability_placeholder_empty_members(self):
+        """Test placeholder with empty member list"""
+        members = []
+
+        result = self.agent.evaluate_availability_placeholder(members)
+
+        self.assertEqual(result["status"], "placeholder")
+        self.assertEqual(result["members"], {})
+
+    def test_evaluate_availability_placeholder_duplicate_names(self):
+        """Test placeholder with duplicate member names"""
+        members = [
+            {"name": "張三", "role": "證道"},
+            {"name": "張三", "role": "司會"},
+            {"name": "李四", "role": "招待"}
+        ]
+
+        result = self.agent.evaluate_availability_placeholder(members)
+
+        # Should only have 2 unique members
+        self.assertEqual(len(result["members"]), 2)
+        self.assertIn("張三", result["members"])
+        self.assertIn("李四", result["members"])
+
+    def test_evaluate_availability_placeholder_missing_names(self):
+        """Test placeholder with members missing name field"""
+        members = [
+            {"role": "證道"},  # No name
+            {"name": "李四", "role": "司會"}
+        ]
+
+        result = self.agent.evaluate_availability_placeholder(members)
+
+        # Should only include member with name
+        self.assertEqual(len(result["members"]), 1)
+        self.assertIn("李四", result["members"])
+
+    def test_evaluate_availability_placeholder_structure(self):
+        """Test that placeholder output has correct structure"""
+        members = [{"name": "張三", "role": "證道"}]
+
+        result = self.agent.evaluate_availability_placeholder(members)
+
+        # Check top-level structure
+        self.assertIn("status", result)
+        self.assertIn("evaluation_date", result)
+        self.assertIn("members", result)
+
+        # Check member structure
+        member_data = result["members"]["張三"]
+        self.assertIn("available", member_data)
+        self.assertIn("preferences", member_data)
+        self.assertIn("constraints", member_data)
+        self.assertIsInstance(member_data["available"], bool)
+        self.assertIsInstance(member_data["preferences"], dict)
+        self.assertIsInstance(member_data["constraints"], list)
+
+
+class TestBuildAIPayload(unittest.TestCase):
+    """Test build_ai_payload method"""
+
+    def setUp(self):
+        """Set up test fixtures"""
+        self.mock_client = Mock(spec=RosterAPIClient)
+        self.agent = AIAgent(self.mock_client)
+
+        # Sample data
+        self.historical_events = [
+            {"id": 1, "date": "2024-01-01", "category": "chinese"},
+            {"id": 2, "date": "2024-01-08", "category": "chinese"}
+        ]
+        self.availability = {
+            "status": "placeholder",
+            "members": {
+                "張三": {"available": True},
+                "李四": {"available": True}
+            }
         }
 
-        result = ai_agent.execute_roster_generation(months_ahead=1, dry_run=True)
+    def test_build_ai_payload_basic(self):
+        """Test building AI payload with basic parameters"""
+        payload = self.agent.build_ai_payload(
+            self.historical_events,
+            self.availability,
+            months_ahead=3,
+            category="chinese"
+        )
 
-        assert result["status"] == "success"
-        assert "generated_count" in result
-        assert "validated_count" in result
-        assert "submitted_count" in result
+        # Check top-level structure
+        self.assertIn("metadata", payload)
+        self.assertIn("historical_events", payload)
+        self.assertIn("availability", payload)
+        self.assertIn("generation_params", payload)
 
-    def test_execute_roster_generation_dry_run(
-        self, ai_agent, mock_api_client, mock_ai_analyzer
-    ):
-        """Test that dry run mode doesn't submit rosters"""
-        # Mock dependencies
-        mock_api_client.get_events.return_value = []
-        mock_ai_analyzer.analyze_historical_patterns.return_value = {}
-        mock_ai_analyzer.generate_roster_recommendations.return_value = []
-        mock_ai_analyzer.validate_roster.return_value = {
-            "is_valid": True,
-            "errors": [],
-            "warnings": [],
-        }
+        # Check metadata
+        self.assertEqual(payload["metadata"]["category"], "chinese")
+        self.assertIn("generation_request_id", payload["metadata"])
+        self.assertIn("date_range", payload["metadata"])
+        self.assertIn("generated_at", payload["metadata"])
 
-        result = ai_agent.execute_roster_generation(months_ahead=1, dry_run=True)
+        # Check data is included
+        self.assertEqual(payload["historical_events"], self.historical_events)
+        self.assertEqual(payload["availability"], self.availability)
 
-        # Verify no submission in dry run mode
-        assert result["submitted_count"] == 0
+        # Check generation params
+        self.assertEqual(payload["generation_params"]["months_ahead"], 3)
 
-    def test_execute_roster_generation_error_handling(self, ai_agent, mock_api_client):
-        """Test error handling in roster generation workflow"""
-        # Simulate an error
-        mock_api_client.get_events.side_effect = Exception("Test error")
+    def test_build_ai_payload_unique_request_id(self):
+        """Test that each payload gets a unique request ID"""
+        payload1 = self.agent.build_ai_payload(
+            self.historical_events,
+            self.availability
+        )
+        payload2 = self.agent.build_ai_payload(
+            self.historical_events,
+            self.availability
+        )
 
-        result = ai_agent.execute_roster_generation(months_ahead=1)
+        request_id1 = payload1["metadata"]["generation_request_id"]
+        request_id2 = payload2["metadata"]["generation_request_id"]
 
-        assert result["status"] == "failed"
-        assert len(result["errors"]) > 0
-        assert "Test error" in result["errors"][0]
+        self.assertNotEqual(request_id1, request_id2)
+
+        # Check they are valid UUIDs
+        uuid.UUID(request_id1)  # Will raise if invalid
+        uuid.UUID(request_id2)  # Will raise if invalid
+
+    def test_build_ai_payload_date_range_calculation(self):
+        """Test that date range is calculated correctly"""
+        payload = self.agent.build_ai_payload(
+            self.historical_events,
+            self.availability,
+            months_ahead=3
+        )
+
+        date_range = payload["metadata"]["date_range"]
+        from_date = date.fromisoformat(date_range["from"])
+        to_date = date.fromisoformat(date_range["to"])
+
+        # From should be today
+        self.assertEqual(from_date, date.today())
+
+        # To should be approximately 3 months ahead (90 days)
+        expected_to_date = date.today() + timedelta(days=90)
+        self.assertEqual(to_date, expected_to_date)
+
+    def test_build_ai_payload_different_months_ahead(self):
+        """Test with different months_ahead values"""
+        for months in [1, 2, 3, 6, 12]:
+            with self.subTest(months=months):
+                payload = self.agent.build_ai_payload(
+                    self.historical_events,
+                    self.availability,
+                    months_ahead=months
+                )
+
+                self.assertEqual(payload["generation_params"]["months_ahead"], months)
+
+                # Check date range
+                date_range = payload["metadata"]["date_range"]
+                to_date = date.fromisoformat(date_range["to"])
+                expected_to = date.today() + timedelta(days=30 * months)
+                self.assertEqual(to_date, expected_to)
+
+    def test_build_ai_payload_without_category(self):
+        """Test building payload without category"""
+        payload = self.agent.build_ai_payload(
+            self.historical_events,
+            self.availability
+        )
+
+        self.assertIsNone(payload["metadata"]["category"])
+
+    def test_build_ai_payload_invalid_months_ahead(self):
+        """Test that invalid months_ahead raises error"""
+        invalid_values = [0, -1, -10]
+
+        for invalid_months in invalid_values:
+            with self.subTest(months=invalid_months):
+                with self.assertRaises(ValueError) as context:
+                    self.agent.build_ai_payload(
+                        self.historical_events,
+                        self.availability,
+                        months_ahead=invalid_months
+                    )
+                self.assertIn("must be positive", str(context.exception))
+
+    def test_build_ai_payload_json_serializable(self):
+        """Test that payload is JSON serializable"""
+        payload = self.agent.build_ai_payload(
+            self.historical_events,
+            self.availability,
+            months_ahead=3,
+            category="chinese"
+        )
+
+        # This should not raise an exception
+        json_str = json.dumps(payload)
+        self.assertIsInstance(json_str, str)
+
+        # Should be able to parse it back
+        parsed = json.loads(json_str)
+        self.assertEqual(parsed["metadata"]["category"], "chinese")
+
+    def test_build_ai_payload_empty_historical_events(self):
+        """Test building payload with empty historical events"""
+        payload = self.agent.build_ai_payload(
+            [],
+            self.availability,
+            months_ahead=3
+        )
+
+        self.assertEqual(payload["historical_events"], [])
+        self.assertIn("metadata", payload)
+
+    def test_build_ai_payload_empty_availability(self):
+        """Test building payload with empty availability"""
+        empty_availability = {"status": "placeholder", "members": {}}
+
+        payload = self.agent.build_ai_payload(
+            self.historical_events,
+            empty_availability,
+            months_ahead=3
+        )
+
+        self.assertEqual(payload["availability"]["members"], {})
+
+    def test_build_ai_payload_default_strategy(self):
+        """Test that default strategy is included"""
+        payload = self.agent.build_ai_payload(
+            self.historical_events,
+            self.availability
+        )
+
+        self.assertEqual(payload["generation_params"]["strategy"], "balanced")
+
+    def test_build_ai_payload_generated_at_is_today(self):
+        """Test that generated_at is today's date"""
+        payload = self.agent.build_ai_payload(
+            self.historical_events,
+            self.availability
+        )
+
+        generated_at = date.fromisoformat(payload["metadata"]["generated_at"])
+        self.assertEqual(generated_at, date.today())
+
+
+class TestAIAgentIntegration(unittest.TestCase):
+    """Integration tests for AIAgent workflow"""
+
+    def setUp(self):
+        """Set up test fixtures"""
+        self.mock_client = Mock(spec=RosterAPIClient)
+        self.agent = AIAgent(self.mock_client)
+
+    def test_full_workflow(self):
+        """Test complete workflow: fetch -> evaluate -> build"""
+        # Setup mock
+        mock_events = [
+            {"id": 1, "date": "2024-01-01", "members": [{"name": "張三", "role": "證道"}]},
+            {"id": 2, "date": "2024-01-08", "members": [{"name": "李四", "role": "司會"}]}
+        ]
+        self.mock_client.get_events.return_value = mock_events
+
+        # Step 1: Fetch historical events
+        events = self.agent.fetch_last_three_months(category="chinese")
+        self.assertEqual(len(events), 2)
+
+        # Step 2: Extract members and evaluate availability
+        members = []
+        for event in events:
+            members.extend(event.get("members", []))
+
+        availability = self.agent.evaluate_availability_placeholder(members)
+        self.assertEqual(availability["status"], "placeholder")
+        self.assertEqual(len(availability["members"]), 2)
+
+        # Step 3: Build AI payload
+        payload = self.agent.build_ai_payload(
+            events,
+            availability,
+            months_ahead=3,
+            category="chinese"
+        )
+
+        # Verify final payload structure
+        self.assertIn("metadata", payload)
+        self.assertIn("historical_events", payload)
+        self.assertIn("availability", payload)
+        self.assertIn("generation_params", payload)
+
+        # Verify it's JSON serializable
+        json.dumps(payload)
+
+    def test_workflow_with_no_events(self):
+        """Test workflow when no historical events are found"""
+        self.mock_client.get_events.return_value = []
+
+        events = self.agent.fetch_last_three_months()
+        availability = self.agent.evaluate_availability_placeholder([])
+        payload = self.agent.build_ai_payload(events, availability)
+
+        self.assertEqual(payload["historical_events"], [])
+        self.assertEqual(payload["availability"]["members"], {})
+
+
+if __name__ == "__main__":
+    unittest.main()

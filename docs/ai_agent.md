@@ -1,304 +1,386 @@
-# AI Agent for Roster Generation
+# AI Agent Data Gathering
 
 ## Overview
 
-The AI Agent is the core component responsible for automated roster generation. It orchestrates the entire process of analyzing historical data and generating optimal rosters for future services.
+The `AIAgent` module is responsible for gathering and preparing data for AI-powered roster generation. It collects historical roster data, evaluates member availability (placeholder), and builds structured payloads ready for AI consumption.
 
-## Architecture
+## Module Location
 
-```
-AIAgent
-  ├── RosterAPIClient (fetches data from API)
-  ├── AIAnalyzer (analyzes patterns and generates recommendations)
-  └── RosterGenerationRules (configurable rules and constraints)
-```
+- **Implementation**: `src/services/ai_agent.py`
+- **Tests**: `tests/test_services/test_ai_agent.py`
 
-## Job Description
-
-The AI Agent performs the following responsibilities:
-
-1. **Data Collection**: Retrieves the last 3 months of roster data from the API
-2. **Pattern Analysis**: Identifies trends, workload distribution, and team dynamics
-3. **Roster Generation**: Creates balanced rosters for the next 3 months
-4. **Validation**: Ensures generated rosters meet all requirements and constraints
-5. **Submission**: Submits approved rosters back to the system (optional)
-
-### Key Responsibilities
-
-- Maintain fair workload distribution across all team members
-- Ensure adequate role coverage for all services
-- Preserve successful team combinations and chemistry
-- Respect member availability and preferences
-- Optimize for service quality and team satisfaction
-- Handle conflicts and constraints gracefully
-
-## Configuration
-
-### Environment Variables
-
-Configure the AI Agent behavior through environment variables:
-
-```bash
-# Historical data period
-HISTORICAL_MONTHS=3
-
-# Future roster generation period
-FUTURE_MONTHS=3
-
-# Workload rules
-MAX_ASSIGNMENTS_PER_MONTH=4
-MIN_REST_DAYS=7
-PREFER_ROLE_ROTATION=true
-
-# Operation modes
-DRY_RUN=false
-AUTO_APPROVE=false
-```
-
-### Rules Configuration
-
-The AI Agent follows configurable rules defined in `config/roster_rules.yaml`:
-
-```yaml
-# Workload Balancing
-max_assignments_per_month: 4
-min_rest_days: 7
-
-# Role Distribution
-prefer_role_rotation: true
-allow_multiple_roles_same_day: false
-
-# Team Composition
-maintain_team_chemistry: true
-balance_experience_levels: true
-
-# Decision Weights (must sum to 1.0)
-workload_balance_weight: 0.3
-role_coverage_weight: 0.3
-team_chemistry_weight: 0.2
-availability_weight: 0.2
-```
-
-## Usage
-
-### Basic Usage
+## Usage Example
 
 ```python
-from src.services import AIAgent, RosterGenerationRules
-from src.services import RosterAPIClient, AIAnalyzer
+from src.services.roster_api_client import RosterAPIClient
+from src.services.ai_agent import AIAgent
 
-# Initialize components
+# Initialize the API client
 api_client = RosterAPIClient(
-    base_url="http://localhost:8000",
-    api_key="your_api_key"
-)
-ai_analyzer = AIAnalyzer()
-
-# Create AI Agent with default rules
-agent = AIAgent(
-    api_client=api_client,
-    ai_analyzer=ai_analyzer
+    base_url="https://api.example.com",
+    api_key="your-api-key"
 )
 
-# Generate rosters
-results = agent.execute_roster_generation(
+# Create the AI Agent
+agent = AIAgent(api_client)
+
+# Step 1: Fetch last 3 months of historical events
+events = agent.fetch_last_three_months(category='chinese')
+print(f"Fetched {len(events)} events")
+
+# Step 2: Extract members from events
+members = []
+for event in events:
+    members.extend(event.get('members', []))
+
+# Step 3: Evaluate availability (placeholder)
+availability = agent.evaluate_availability_placeholder(members)
+
+# Step 4: Build AI payload
+payload = agent.build_ai_payload(
+    historical_events=events,
+    availability=availability,
     months_ahead=3,
-    category="chinese",
-    dry_run=True
+    category='chinese'
 )
 
-print(f"Status: {results['status']}")
-print(f"Generated: {results['generated_count']} rosters")
-print(f"Validated: {results['validated_count']} rosters")
+# The payload is now ready to be sent to an AI API
+import json
+print(json.dumps(payload, indent=2))
 ```
 
-### Custom Rules
+## Key Methods
 
-```python
-# Create custom rules
-custom_rules = RosterGenerationRules(
-    max_assignments_per_person_per_month=5,
-    min_rest_days_between_assignments=10,
-    prefer_role_rotation=True,
-    maintain_team_chemistry=True
-)
+### `fetch_last_three_months(category: Optional[str] = None) -> List[Dict]`
 
-# Create agent with custom rules
-agent = AIAgent(
-    api_client=api_client,
-    ai_analyzer=ai_analyzer,
-    rules=custom_rules
-)
-```
-
-### Integration with Scheduler
-
-The AI Agent is automatically integrated with the SchedulerService:
-
-```python
-from src.services import SchedulerService
-from src.config import Settings
-
-# Initialize with settings
-settings = Settings()
-scheduler = SchedulerService(settings)
-
-# Run roster generation
-results = scheduler.run_roster_generation()
-```
-
-## Methods
-
-### `execute_roster_generation()`
-
-Main entry point for generating rosters.
+Fetches roster events from the last 90 days using the `RosterAPIClient`.
 
 **Parameters:**
-- `months_ahead` (int): Number of months to generate rosters for (default: 3)
-- `category` (str, optional): Service category filter ('chinese', 'english', 'sundayschool')
-- `dry_run` (bool): If True, validate without submitting to API (default: True)
+- `category` (optional): Filter by service category ('chinese', 'english', 'sundayschool')
 
 **Returns:**
-- Dictionary with generation results:
-  ```python
-  {
-      "status": "success",
-      "generated_count": 12,
-      "validated_count": 12,
-      "submitted_count": 0,
-      "errors": [],
-      "warnings": []
+- List of event dictionaries from the API
+
+**Example:**
+```python
+# Fetch all events
+events = agent.fetch_last_three_months()
+
+# Fetch only Chinese service events
+chinese_events = agent.fetch_last_three_months(category='chinese')
+```
+
+### `evaluate_availability_placeholder(members: List[Dict]) -> Dict[str, Any]`
+
+**🚧 PLACEHOLDER METHOD - Replace with real availability logic**
+
+Currently returns deterministic default availability (all members marked as available). This is where you should implement actual availability evaluation logic.
+
+**Parameters:**
+- `members`: List of member dictionaries (typically extracted from historical events)
+
+**Returns:**
+```python
+{
+    "status": "placeholder",
+    "evaluation_date": "2024-01-15",
+    "members": {
+        "張三": {
+            "available": True,
+            "preferences": {},
+            "constraints": [],
+            "note": "Default availability - replace with actual logic"
+        },
+        "李四": {
+            "available": True,
+            "preferences": {},
+            "constraints": [],
+            "note": "Default availability - replace with actual logic"
+        }
+    }
+}
+```
+
+**Future Implementation Points:**
+1. **Member Preferences**: Retrieve from database or member profiles
+2. **Historical Patterns**: Analyze past scheduling to identify preferences/constraints
+3. **Conflict Detection**: Check for vacations, holidays, other commitments
+4. **Role-Specific Availability**: Different roles may have different availability requirements
+5. **Capacity Constraints**: Limit frequency (e.g., max 2 assignments per month)
+
+**Example:**
+```python
+members = [
+    {"name": "張三", "role": "證道"},
+    {"name": "李四", "role": "司會"}
+]
+
+availability = agent.evaluate_availability_placeholder(members)
+print(availability["status"])  # "placeholder"
+```
+
+### `build_ai_payload(historical_events, availability, months_ahead=3, category=None) -> Dict`
+
+Builds a JSON-serializable payload combining historical data, availability, and generation parameters.
+
+**Parameters:**
+- `historical_events`: List of historical event dictionaries (from `fetch_last_three_months`)
+- `availability`: Availability dictionary (from `evaluate_availability_placeholder`)
+- `months_ahead` (optional): Number of months to generate rosters for (default: 3)
+- `category` (optional): Service category for the roster generation
+
+**Returns:**
+See [Payload Structure](#payload-structure) below
+
+**Example:**
+```python
+payload = agent.build_ai_payload(
+    historical_events=events,
+    availability=availability,
+    months_ahead=3,
+    category='chinese'
+)
+
+# Payload is JSON-serializable
+import json
+json_payload = json.dumps(payload)
+```
+
+## Payload Structure
+
+The AI payload has the following structure:
+
+```json
+{
+  "metadata": {
+    "generation_request_id": "550e8400-e29b-41d4-a716-446655440000",
+    "category": "chinese",
+    "date_range": {
+      "from": "2024-01-15",
+      "to": "2024-04-15"
+    },
+    "generated_at": "2024-01-15"
+  },
+  "historical_events": [
+    {
+      "id": 1,
+      "date": "2023-11-01",
+      "category": "chinese",
+      "serviceInfo": {
+        "id": 501,
+        "category": "chinese",
+        "footnote": ""
+      },
+      "members": [
+        {
+          "name": "張三",
+          "role": "證道"
+        },
+        {
+          "name": "李四",
+          "role": "司會"
+        }
+      ]
+    }
+  ],
+  "availability": {
+    "status": "placeholder",
+    "evaluation_date": "2024-01-15",
+    "members": {
+      "張三": {
+        "available": true,
+        "preferences": {},
+        "constraints": []
+      },
+      "李四": {
+        "available": true,
+        "preferences": {},
+        "constraints": []
+      }
+    }
+  },
+  "generation_params": {
+    "months_ahead": 3,
+    "strategy": "balanced",
+    "note": "Default strategy - can be customized based on requirements"
   }
-  ```
-
-### `fetch_historical_data()`
-
-Retrieves historical roster data from the API.
-
-**Parameters:**
-- `months_back` (int): Number of months of historical data (default: 3)
-- `category` (str, optional): Service category filter
-
-**Returns:**
-- List of historical event dictionaries
-
-### `generate_future_rosters()`
-
-Generates rosters for upcoming services.
-
-**Parameters:**
-- `months_ahead` (int): Number of months to generate rosters for (default: 3)
-- `category` (str, optional): Service category filter
-- `available_members` (list, optional): List of available members
-
-**Returns:**
-- List of generated roster assignments
-
-### `validate_generated_roster()`
-
-Validates a generated roster against rules.
-
-**Parameters:**
-- `roster` (dict): Roster to validate
-
-**Returns:**
-- Validation result dictionary:
-  ```python
-  {
-      "is_valid": True,
-      "errors": [],
-      "warnings": []
-  }
-  ```
-
-## Roster Generation Rules
-
-### RosterGenerationRules Class
-
-Configurable rules that guide roster generation:
-
-**Workload Balancing:**
-- `max_assignments_per_person_per_month`: Maximum assignments per person (default: 4)
-- `min_rest_days_between_assignments`: Minimum rest days between assignments (default: 7)
-
-**Role Distribution:**
-- `prefer_role_rotation`: Rotate people through different roles (default: True)
-- `allow_multiple_roles_same_day`: Allow multiple roles per person per day (default: False)
-
-**Team Composition:**
-- `maintain_team_chemistry`: Preserve successful team combinations (default: True)
-- `balance_experience_levels`: Mix experienced and new members (default: True)
-
-**Availability:**
-- `respect_member_availability`: Honor member preferences (default: True)
-- `require_minimum_team_size`: Minimum team size required (default: 3)
-
-**Decision Weights:**
-- `workload_balance_weight`: Weight for workload balancing (default: 0.3)
-- `role_coverage_weight`: Weight for role coverage (default: 0.3)
-- `team_chemistry_weight`: Weight for team chemistry (default: 0.2)
-- `availability_weight`: Weight for availability (default: 0.2)
-
-All weights must sum to 1.0.
-
-## Error Handling
-
-The AI Agent handles errors gracefully:
-
-```python
-try:
-    results = agent.execute_roster_generation()
-    
-    if results["status"] == "failed":
-        for error in results["errors"]:
-            print(f"Error: {error}")
-    
-    for warning in results["warnings"]:
-        print(f"Warning: {warning}")
-        
-except Exception as e:
-    print(f"Fatal error: {e}")
+}
 ```
 
-## Dry Run Mode
+### Payload Fields
 
-Use dry run mode to test roster generation without submitting to the API:
+#### `metadata`
+- `generation_request_id`: Unique UUID for this generation request
+- `category`: Service category (if specified)
+- `date_range`: Target date range for roster generation
+  - `from`: Start date (today)
+  - `to`: End date (today + months_ahead * 30 days)
+- `generated_at`: Timestamp when payload was created
+
+#### `historical_events`
+- Array of event objects from the last 3 months
+- Each event contains:
+  - Event metadata (id, date, category)
+  - Service information
+  - Member assignments with roles
+
+#### `availability`
+- `status`: Currently "placeholder" - will change when real availability logic is implemented
+- `evaluation_date`: Date when availability was evaluated
+- `members`: Dictionary keyed by member name
+  - `available`: Boolean indicating availability
+  - `preferences`: Object for member preferences (future use)
+  - `constraints`: Array of constraints (future use)
+
+#### `generation_params`
+- `months_ahead`: Number of months to generate
+- `strategy`: Generation strategy (currently "balanced")
+- Additional parameters can be added as needed
+
+## Extending the AIAgent
+
+### Implementing Real Availability Logic
+
+Replace the `evaluate_availability_placeholder` method with actual availability evaluation:
 
 ```python
-# Dry run - validate without submitting
-results = agent.execute_roster_generation(dry_run=True)
+def evaluate_availability(self, members: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Real availability evaluation implementation
+    """
+    availability = {
+        "status": "evaluated",
+        "evaluation_date": date.today().isoformat(),
+        "members": {}
+    }
 
-# Check results before actual submission
-if results["status"] == "success" and results["validated_count"] > 0:
-    # Now run for real
-    results = agent.execute_roster_generation(dry_run=False)
+    for member in members:
+        member_name = member.get("name")
+        if not member_name:
+            continue
+
+        # TODO: Implement actual logic
+        # - Query member preferences from database
+        # - Check historical patterns
+        # - Detect conflicts (vacations, etc.)
+        # - Apply role-specific rules
+
+        availability["members"][member_name] = {
+            "available": self._check_availability(member_name),
+            "preferences": self._get_preferences(member_name),
+            "constraints": self._get_constraints(member_name)
+        }
+
+    return availability
+```
+
+### Adding Custom Generation Strategies
+
+Extend `build_ai_payload` to support different generation strategies:
+
+```python
+def build_ai_payload(
+    self,
+    historical_events: List[Dict[str, Any]],
+    availability: Dict[str, Any],
+    months_ahead: int = 3,
+    category: Optional[str] = None,
+    strategy: str = "balanced"  # Add strategy parameter
+) -> Dict[str, Any]:
+    # ... existing code ...
+
+    payload["generation_params"]["strategy"] = strategy
+
+    # Add strategy-specific parameters
+    if strategy == "minimize_workload":
+        payload["generation_params"]["max_assignments_per_member"] = 2
+    elif strategy == "maximize_variety":
+        payload["generation_params"]["role_rotation"] = True
+
+    return payload
 ```
 
 ## Testing
 
-Run AI Agent tests:
+The module has comprehensive unit tests in `tests/test_services/test_ai_agent.py`:
 
 ```bash
 # Run all AI Agent tests
 pytest tests/test_services/test_ai_agent.py -v
 
-# Run specific test
-pytest tests/test_services/test_ai_agent.py::TestAIAgent::test_execute_roster_generation_success -v
+# Run specific test class
+pytest tests/test_services/test_ai_agent.py::TestBuildAIPayload -v
+
+# Run with coverage
+pytest tests/test_services/test_ai_agent.py --cov=src.services.ai_agent
 ```
+
+### Test Coverage
+
+- ✅ Initialization
+- ✅ Fetching last 3 months with/without category
+- ✅ Date range validation (exactly 90 days)
+- ✅ Placeholder availability evaluation
+- ✅ Deterministic output
+- ✅ Duplicate member handling
+- ✅ Payload structure validation
+- ✅ JSON serializability
+- ✅ Unique request IDs
+- ✅ Date range calculations
+- ✅ Error handling (API errors, invalid parameters)
+- ✅ Full workflow integration
+
+## Integration with RosterAPIClient
+
+The `AIAgent` uses `RosterAPIClient` for all network operations:
+
+```python
+# AIAgent delegates to RosterAPIClient
+events = agent.fetch_last_three_months(category='chinese')
+
+# Internally calls:
+# api_client.get_events(
+#     category='chinese',
+#     from_date=today - 90 days,
+#     to_date=today
+# )
+```
+
+This keeps the `AIAgent` focused on data preparation logic while the `RosterAPIClient` handles:
+- HTTP requests
+- Error handling
+- Response validation
+- Authentication
 
 ## Future Enhancements
 
-Planned improvements for the AI Agent:
+1. **Availability Integration**
+   - Connect to member availability database
+   - Implement preference management
+   - Add conflict detection
 
-1. **Machine Learning Integration**: Use actual ML models for pattern recognition
-2. **Member Availability API**: Integrate with availability tracking system
-3. **Conflict Resolution**: Advanced logic for handling scheduling conflicts
-4. **Performance Metrics**: Track and optimize roster performance over time
-5. **Multi-service Optimization**: Optimize across multiple service types simultaneously
-6. **Real-time Adjustments**: Dynamic roster updates based on last-minute changes
+2. **Advanced Analytics**
+   - Analyze historical patterns
+   - Identify workload imbalances
+   - Suggest optimal assignments
+
+3. **Caching**
+   - Cache historical data
+   - Cache member availability
+   - Invalidate on updates
+
+4. **Multiple Strategies**
+   - Load balancing strategy
+   - Rotation strategy
+   - Preference-based strategy
+
+5. **Validation**
+   - Validate payload structure
+   - Check data completeness
+   - Verify date ranges
 
 ## See Also
 
-- [AIAnalyzer Documentation](./ai_analyzer.md)
-- [API Client Documentation](../api.md)
-- [Configuration Guide](./configuration.md)
+- [Domain Models](models.md) - Event, ServiceInfo, and Member models
+- [API Documentation](api.md) - REST API endpoints
+- `src/services/roster_api_client.py` - API client implementation
