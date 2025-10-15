@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git checkout:*)",
+      "Bash(python -m pytest tests/test_services/test_roster_data_agent.py -v)",
+      "Bash(python -m pytest tests/test_services/test_ai_analyzer.py -v)",
+      "Bash(python -m pytest tests/test_services/test_roster_orchestrator.py -v)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

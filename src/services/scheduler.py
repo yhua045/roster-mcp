@@ -54,7 +54,7 @@ class SchedulerService:
 
         # TODO: Gracefully shut down scheduler
 
-    def run_roster_generation(self):
+    def run_roster_generation(self, orchestrator=None):
         """
         Execute roster generation task
 
@@ -62,19 +62,42 @@ class SchedulerService:
         1. Fetches historical data
         2. Analyzes patterns
         3. Generates recommendations
-        4. Submits new rosters
+        4. Validates generated roster
+        5. (Future) Submits new rosters
+
+        Args:
+            orchestrator: Optional RosterOrchestrator instance.
+                         If None, must be configured in settings.
         """
         logger.info("Starting roster generation task")
 
         try:
-            # TODO: Implement roster generation workflow
-            # 1. Get historical events from API
-            # 2. Run AI analysis
-            # 3. Generate roster recommendations
-            # 4. Validate generated roster
-            # 5. Submit to API
+            if orchestrator is None:
+                logger.error("No orchestrator configured - cannot run roster generation")
+                return
 
-            logger.info("Roster generation completed successfully")
+            # Run the complete workflow using orchestrator
+            result = orchestrator.generate_roster_for_upcoming_months(
+                months_ahead=3,  # TODO: Make configurable
+                category=None,    # TODO: Make configurable or run for each category
+                historical_months=3
+            )
+
+            # Log results
+            logger.info(
+                f"Roster generation completed successfully: "
+                f"{len(result['rosters'])} rosters generated, "
+                f"validation: {'PASS' if result['validation']['is_valid'] else 'FAIL'}"
+            )
+
+            if not result['validation']['is_valid']:
+                logger.warning(
+                    f"Validation errors: {result['validation']['errors']}"
+                )
+
+            # TODO: Submit to API if validation passed
+            # if result['validation']['is_valid']:
+            #     self._submit_rosters(result['rosters'])
 
         except Exception as e:
             logger.error(f"Roster generation failed: {e}")
