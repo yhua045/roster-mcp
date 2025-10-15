@@ -67,7 +67,7 @@ class SchedulerService:
 
         # TODO: Gracefully shut down scheduler
 
-    def run_roster_generation(self):
+    def run_roster_generation(self, orchestrator=None):
         """
         Execute roster generation task
 
@@ -75,37 +75,43 @@ class SchedulerService:
         1. Fetches historical data
         2. Analyzes patterns
         3. Generates recommendations
-        4. Submits new rosters
+        4. Validates generated roster
+        5. (Future) Submits new rosters
+
+        Args:
+            orchestrator: Optional RosterOrchestrator instance.
+                         If None, falls back to AI Agent execution.
         """
         logger.info("Starting roster generation task")
 
         try:
-            # Execute roster generation through AI Agent
-            results = self.ai_agent.execute_roster_generation(
-                months_ahead=self.settings.future_months,
-                category=None,  # Generate for all categories
-                dry_run=self.settings.dry_run_mode,
-            )
+            if orchestrator is not None:
+                # Run the complete workflow using orchestrator
+                result = orchestrator.generate_roster_for_upcoming_months(
+                    months_ahead=3,  # TODO: Make configurable
+                    category=None,    # TODO: Make configurable or run for each category
+                    historical_months=3
+                )
 
-            # Log results
-            logger.info(
-                f"Roster generation completed: "
-                f"status={results['status']}, "
-                f"generated={results['generated_count']}, "
-                f"validated={results['validated_count']}, "
-                f"submitted={results['submitted_count']}"
-            )
+                # Log results
+                logger.info(
+                    f"Roster generation completed successfully: "
+                    f"{len(result['rosters'])} rosters generated, "
+                    f"validation: {'PASS' if result['validation']['is_valid'] else 'FAIL'}"
+                )
 
-            # Log any errors or warnings
-            if results["errors"]:
-                for error in results["errors"]:
-                    logger.error(f"Generation error: {error}")
+                if not result['validation']['is_valid']:
+                    logger.warning(
+                        f"Validation errors: {result['validation']['errors']}"
+                    )
 
-            if results["warnings"]:
-                for warning in results["warnings"]:
-                    logger.warning(f"Generation warning: {warning}")
-
-            return results
+                return result
+            else:
+                # Fallback to using AI Agent directly
+                logger.info("No orchestrator provided, using AI Agent directly")
+                # TODO: Implement direct AI Agent execution
+                logger.warning("Direct AI Agent execution not yet implemented")
+                return None
 
         except Exception as e:
             logger.error(f"Roster generation failed: {e}", exc_info=True)
