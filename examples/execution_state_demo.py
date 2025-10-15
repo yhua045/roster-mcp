@@ -23,8 +23,7 @@ from src.services.execution_state import (
 
 # Set up logging
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
@@ -34,42 +33,38 @@ def example_basic_usage():
     print("\n" + "=" * 60)
     print("Example 1: Basic Execution Tracking")
     print("=" * 60)
-    
+
     manager = ExecutionManager()
-    
+
     # Check if we can start a run
     if manager.can_start_run():
         print("\n✓ Can start a new run")
-        
+
         # Start a new execution
         record = manager.start_run(
             generation_request_id="example-gen-123",
             created_by="demo_script",
-            notes="Example execution for demonstration"
+            notes="Example execution for demonstration",
         )
-        
+
         print(f"\nStarted execution:")
         print(f"  ID: {record.id}")
         print(f"  Status: {record.status.value}")
         print(f"  Started at: {record.started_at}")
-        
+
         # Simulate some work
         print("\nSimulating work...")
         sleep(1)
-        
+
         # Finish successfully
         manager.finish_run(
             record.id,
             status=ExecutionStatus.SUCCESS,
-            result={
-                "generated_count": 10,
-                "validated_count": 10,
-                "duration_seconds": 1.0
-            }
+            result={"generated_count": 10, "validated_count": 10, "duration_seconds": 1.0},
         )
-        
+
         print("\n✓ Execution finished successfully")
-        
+
         # Retrieve the finished record
         finished = manager.store.get_by_id(record.id)
         print(f"\nFinal status: {finished.status.value}")
@@ -83,32 +78,26 @@ def example_prevent_concurrent_runs():
     print("\n" + "=" * 60)
     print("Example 2: Preventing Concurrent Runs")
     print("=" * 60)
-    
+
     manager = ExecutionManager()
-    
+
     # Start first execution
-    record1 = manager.start_run(
-        created_by="demo_script",
-        notes="First execution"
-    )
+    record1 = manager.start_run(created_by="demo_script", notes="First execution")
     print(f"\n✓ Started first execution: {record1.id}")
-    
+
     # Try to start second execution (should be prevented)
     if manager.can_start_run():
         print("\n✗ Unexpected: Second run was allowed to start")
     else:
         print("\n✓ Correctly prevented second run (first is still RUNNING)")
-    
+
     # Finish the first execution
     manager.finish_run(record1.id, ExecutionStatus.SUCCESS)
     print(f"\n✓ Finished first execution")
-    
+
     # Now second execution should be allowed
     if manager.can_start_run():
-        record2 = manager.start_run(
-            created_by="demo_script",
-            notes="Second execution"
-        )
+        record2 = manager.start_run(created_by="demo_script", notes="Second execution")
         print(f"\n✓ Started second execution: {record2.id}")
         manager.finish_run(record2.id, ExecutionStatus.SUCCESS)
     else:
@@ -120,17 +109,14 @@ def example_error_handling():
     print("\n" + "=" * 60)
     print("Example 3: Error Handling")
     print("=" * 60)
-    
+
     manager = ExecutionManager()
-    
+
     # Start execution
-    record = manager.start_run(
-        created_by="demo_script",
-        notes="Execution that will fail"
-    )
-    
+    record = manager.start_run(created_by="demo_script", notes="Execution that will fail")
+
     print(f"\n✓ Started execution: {record.id}")
-    
+
     try:
         # Simulate work that fails
         print("\nSimulating work that fails...")
@@ -140,14 +126,11 @@ def example_error_handling():
         manager.finish_run(
             record.id,
             status=ExecutionStatus.FAILED,
-            result={
-                "error": str(e),
-                "error_type": type(e).__name__
-            }
+            result={"error": str(e), "error_type": type(e).__name__},
         )
-        
+
         print(f"\n✓ Recorded failure: {e}")
-        
+
         # Retrieve the failed record
         failed = manager.store.get_by_id(record.id)
         print(f"\nFinal status: {failed.status.value}")
@@ -159,18 +142,18 @@ def example_query_history():
     print("\n" + "=" * 60)
     print("Example 4: Querying Execution History")
     print("=" * 60)
-    
+
     manager = ExecutionManager()
-    
+
     # Create several executions
     print("\nCreating sample executions...")
     for i in range(5):
         record = manager.start_run(
             generation_request_id=f"gen-{i}",
             created_by="demo_script",
-            notes=f"Sample execution {i+1}"
+            notes=f"Sample execution {i+1}",
         )
-        
+
         # Finish with different statuses
         if i % 3 == 0:
             status = ExecutionStatus.SUCCESS
@@ -178,19 +161,19 @@ def example_query_history():
             status = ExecutionStatus.FAILED
         else:
             status = ExecutionStatus.SUCCESS
-        
+
         manager.finish_run(record.id, status=status)
         sleep(0.1)  # Small delay to ensure different timestamps
-    
+
     # Query recent history
     end = datetime.utcnow()
     start = end - timedelta(days=1)
-    
+
     history = manager.get_history(start, end, limit=10)
-    
+
     print(f"\n✓ Retrieved {len(history)} executions from last 24 hours:")
     print()
-    
+
     for record in history:
         print(f"ID: {record.id[:8]}...")
         print(f"  Request ID: {record.generation_request_id}")
@@ -205,12 +188,12 @@ def example_get_latest():
     print("\n" + "=" * 60)
     print("Example 5: Getting Latest Execution")
     print("=" * 60)
-    
+
     manager = ExecutionManager()
-    
+
     # Get latest (might be from previous examples)
     latest = manager.get_latest()
-    
+
     if latest:
         print(f"\n✓ Latest execution found:")
         print(f"  ID: {latest.id}")
@@ -228,16 +211,16 @@ def example_using_locks():
     print("\n" + "=" * 60)
     print("Example 6: Using Locks for Critical Sections")
     print("=" * 60)
-    
+
     store = SqliteExecutionStore()
-    
+
     # Try to acquire a lock
     lock_key = "critical-operation"
-    
+
     print(f"\nAttempting to acquire lock: {lock_key}")
     if store.acquire_run_lock(lock_key, timeout_seconds=60):
         print("✓ Lock acquired")
-        
+
         try:
             # Perform critical work
             print("\nPerforming critical work...")
@@ -249,7 +232,7 @@ def example_using_locks():
             print("✓ Lock released")
     else:
         print("✗ Could not acquire lock (already held)")
-    
+
     # Try to acquire again (should succeed now)
     print(f"\nAttempting to acquire lock again: {lock_key}")
     if store.acquire_run_lock(lock_key, timeout_seconds=60):
@@ -264,31 +247,28 @@ def example_custom_db_path():
     print("\n" + "=" * 60)
     print("Example 7: Custom Database Path")
     print("=" * 60)
-    
+
     import tempfile
     import os
-    
+
     # Create a temporary database file
     temp_dir = tempfile.gettempdir()
     db_path = os.path.join(temp_dir, "custom_execution_state.db")
-    
+
     print(f"\nUsing custom database: {db_path}")
-    
+
     # Create store with custom path
     store = SqliteExecutionStore(db_path=db_path)
     manager = ExecutionManager(store=store)
-    
+
     # Use the manager
-    record = manager.start_run(
-        created_by="demo_script",
-        notes="Using custom database path"
-    )
-    
+    record = manager.start_run(created_by="demo_script", notes="Using custom database path")
+
     print(f"✓ Created record in custom database: {record.id}")
-    
+
     manager.finish_run(record.id, ExecutionStatus.SUCCESS)
     print("✓ Execution completed")
-    
+
     # Clean up
     store.close()
     if os.path.exists(db_path):
@@ -301,7 +281,7 @@ def main():
     print("\n" + "=" * 60)
     print("Execution State Machine Examples")
     print("=" * 60)
-    
+
     try:
         example_basic_usage()
         example_prevent_concurrent_runs()
@@ -310,12 +290,12 @@ def main():
         example_get_latest()
         example_using_locks()
         example_custom_db_path()
-        
+
         print("\n" + "=" * 60)
         print("All examples completed successfully!")
         print("=" * 60)
         print()
-        
+
     except Exception as e:
         logger.error(f"Example execution failed: {e}", exc_info=True)
         print(f"\n✗ Error running examples: {e}")
