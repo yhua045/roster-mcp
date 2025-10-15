@@ -85,33 +85,32 @@ class SchedulerService:
         logger.info("Starting roster generation task")
 
         try:
-            if orchestrator is not None:
-                # Run the complete workflow using orchestrator
-                result = orchestrator.generate_roster_for_upcoming_months(
-                    months_ahead=3,  # TODO: Make configurable
-                    category=None,    # TODO: Make configurable or run for each category
-                    historical_months=3
+            if orchestrator is None:
+                logger.error("No orchestrator configured - cannot run roster generation")
+                return
+
+            # Run the complete workflow using orchestrator
+            result = orchestrator.generate_roster_for_upcoming_months(
+                months_ahead=3,  # TODO: Make configurable
+                category=None,    # TODO: Make configurable or run for each category
+                historical_months=3
+            )
+
+            # Log results
+            logger.info(
+                f"Roster generation completed successfully: "
+                f"{len(result['rosters'])} rosters generated, "
+                f"validation: {'PASS' if result['validation']['is_valid'] else 'FAIL'}"
+            )
+
+            if not result['validation']['is_valid']:
+                logger.warning(
+                    f"Validation errors: {result['validation']['errors']}"
                 )
 
-                # Log results
-                logger.info(
-                    f"Roster generation completed successfully: "
-                    f"{len(result['rosters'])} rosters generated, "
-                    f"validation: {'PASS' if result['validation']['is_valid'] else 'FAIL'}"
-                )
-
-                if not result['validation']['is_valid']:
-                    logger.warning(
-                        f"Validation errors: {result['validation']['errors']}"
-                    )
-
-                return result
-            else:
-                # Fallback to using AI Agent directly
-                logger.info("No orchestrator provided, using AI Agent directly")
-                # TODO: Implement direct AI Agent execution
-                logger.warning("Direct AI Agent execution not yet implemented")
-                return None
+            # TODO: Submit to API if validation passed
+            # if result['validation']['is_valid']:
+            #     self._submit_rosters(result['rosters'])
 
         except Exception as e:
             logger.error(f"Roster generation failed: {e}", exc_info=True)
