@@ -5,7 +5,7 @@ Scheduling service for running roster generation at regular intervals
 import logging
 from datetime import datetime
 
-from .ai_agent import AIAgent, RosterGenerationRules
+from .ai_agent import AIAgent
 from .ai_analyzer import AIAnalyzer
 from .roster_api_client import RosterAPIClient
 
@@ -38,17 +38,8 @@ class SchedulerService:
         )
         self.ai_analyzer = AIAnalyzer()
 
-        # Initialize roster generation rules from settings
-        self.rules = RosterGenerationRules(
-            max_assignments_per_person_per_month=settings.max_assignments_per_month,
-            min_rest_days_between_assignments=settings.min_rest_days,
-            prefer_role_rotation=settings.prefer_role_rotation,
-        )
-
         # Initialize AI Agent
-        self.ai_agent = AIAgent(
-            api_client=self.api_client, ai_analyzer=self.ai_analyzer, rules=self.rules
-        )
+        self.ai_agent = AIAgent(api_client=self.api_client)
 
         # TODO: Initialize scheduler (e.g., APScheduler, cron)
 
@@ -89,7 +80,7 @@ class SchedulerService:
 
         Args:
             orchestrator: Optional RosterOrchestrator instance.
-                         If None, must be configured in settings.
+                         If None, falls back to AI Agent execution.
         """
         logger.info("Starting roster generation task")
 

@@ -92,6 +92,8 @@ python -m migrations.apply
 - [Domain Models](docs/models.md) - Detailed model specifications
 - [API Documentation](docs/api.md) - REST API endpoints and contracts
 - [Roster Data Agent](docs/roster_data_agent.md) - Data gathering for roster generation
+- [AI Agent](docs/ai_agent.md) - Data gathering and payload preparation for AI roster generation
+- [Execution State](docs/execution_state.md) - State machine for tracking AI Agent executions
 - [Deployment Guide](docs/deployment.md) - Production deployment instructions
 
 ## License
