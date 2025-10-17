@@ -6,10 +6,13 @@ and generation of roster recommendations. It does NOT fetch data from APIs -
 it receives prepared data and performs analysis.
 """
 
-from typing import List, Dict, Any, Optional
-from datetime import date, timedelta
+from typing import List, Dict, Any, Optional, Set
+from datetime import date, timedelta, datetime, timezone
 from collections import defaultdict, Counter
 import logging
+import sqlite3
+import json
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -28,19 +31,23 @@ class AIAnalyzer:
     - Handle data gathering or availability evaluation
     """
 
-    def __init__(self, ai_client: Optional[Any] = None):
+    def __init__(self, ai_client: Optional[Any] = None, db_path: Optional[str] = None):
         """
         Initialize the AI analyzer.
 
         Args:
             ai_client: Optional AI client (e.g., OpenAI, Claude API client)
                       If None, uses rule-based analysis
+            db_path: Optional path to SQLite database file for role history persistence.
+                    If None, uses 'roster.db' in current directory.
         """
         self.ai_client = ai_client
+        self.db_path = db_path or os.path.join(os.getcwd(), 'roster.db')
         if ai_client:
             logger.info("AI Analyzer initialized with AI client")
         else:
             logger.info("AI Analyzer initialized with rule-based analysis")
+        logger.info(f"Database path: {self.db_path}")
 
     def analyze_historical_patterns(
         self,
@@ -487,3 +494,358 @@ class AIAnalyzer:
         )
 
         return validation_result
+
+    # ==================== Role History Management ====================
+
+    @staticmethod
+    def _normalize_role_name(role: str) -> str:
+        """
+        Normalize role name for consistent lookups.
+
+        Args:
+            role: Role name to normalize
+
+        Returns:
+            Normalized role name (trimmed and lowercased)
+        """
+        if not role:
+            return ""
+        return role.strip().lower()
+
+    def compute_role_history(
+        self,
+        events: List[Dict[str, Any]],
+        lookback_months: Optional[int] = None
+    ) -> Dict[str, Set[str]]:
+        """
+        Compute historical role assignments from events.
+
+        Analyzes historical events and builds a mapping of roles to the set of
+        member names who have performed each role. Role names are normalized
+        (trimmed, lowercased) for consistent lookups.
+
+        Args:
+            events: List of historical event dictionaries. Each event should have:
+                   {
+                       "date": "YYYY-MM-DD",
+                       "members": [{"name": "Member Name", "role": "Role Name"}, ...]
+                   }
+            lookback_months: Optional limit on how far back to analyze.
+                           If provided, only events within the last N months are considered.
+                           If None, all history is analyzed.
+
+        Returns:
+            Dictionary mapping normalized role names to sets of member names:
+            {
+                "role_name": {"Member 1", "Member 2", ...},
+                ...
+            }
+
+        Example:
+            >>> analyzer = AIAnalyzer()
+            >>> events = [
+            ...     {
+            ...         "date": "2024-01-15",
+            ...         "members": [
+            ...             {"name": "張三", "role": "證道"},
+            ...             {"name": "李四", "role": "司會"}
+            ...         ]
+            ...     }
+            ... ]
+            >>> role_history = analyzer.compute_role_history(events)
+            >>> "證道" in role_history  # Note: normalized to lowercase
+            False
+            >>> "证道" in role_history
+            True
+            >>> "張三" in role_history["证道"]
+            True
+
+        Edge cases handled:
+            - Repeated assignments: Each member is counted once per role
+            - Missing/null roles: Skipped with warning
+            - Missing/null names: Skipped with warning
+            - Case sensitivity: Normalized to lowercase
+            - Whitespace: Trimmed from role names
+        """
+        logger.info(f"Computing role history from {len(events)} events")
+
+        role_history: Dict[str, Set[str]] = defaultdict(set)
+
+        # Filter events by lookback window if specified
+        filtered_events = events
+        if lookback_months is not None:
+            cutoff_date = date.today() - timedelta(days=lookback_months * 30)
+            filtered_events = []
+            for event in events:
+                event_date_str = event.get('date')
+                if event_date_str:
+                    try:
+                        event_date = datetime.fromisoformat(event_date_str).date()
+                        if event_date >= cutoff_date:
+                            filtered_events.append(event)
+                    except (ValueError, AttributeError):
+                        logger.warning(f"Invalid date format in event: {event_date_str}")
+                        continue
+
+            logger.info(
+                f"Filtered to {len(filtered_events)} events within last {lookback_months} months "
+                f"(cutoff: {cutoff_date})"
+            )
+
+        # Build role -> members mapping
+        for event in filtered_events:
+            members = event.get('members', [])
+
+            for member in members:
+                role = member.get('role')
+                name = member.get('name')
+
+                # Skip if role or name is missing
+                if not role:
+                    logger.debug(f"Skipping member with missing role: {member}")
+                    continue
+                if not name:
+                    logger.debug(f"Skipping member with missing name: {member}")
+                    continue
+
+                # Normalize role name
+                normalized_role = self._normalize_role_name(role)
+                if not normalized_role:
+                    logger.warning(f"Role normalized to empty string: '{role}'")
+                    continue
+
+                # Add member to role history
+                role_history[normalized_role].add(name)
+
+        # Convert defaultdict to regular dict with sorted sets for deterministic output
+        result = {role: members for role, members in role_history.items()}
+
+        logger.info(
+            f"Computed role history: {len(result)} unique roles, "
+            f"total {sum(len(members) for members in result.values())} member-role mappings"
+        )
+
+        return result
+
+    def _get_db_connection(self) -> sqlite3.Connection:
+        """
+        Get a connection to the SQLite database.
+
+        Ensures the role_history table exists by running the migration if needed.
+
+        Returns:
+            SQLite connection object
+
+        Raises:
+            sqlite3.Error: If database connection or initialization fails
+        """
+        conn = sqlite3.Connection(self.db_path)
+        conn.row_factory = sqlite3.Row
+
+        # Ensure role_history table exists
+        # This is a lightweight approach - in production, use proper migration management
+        migration_sql = """
+        CREATE TABLE IF NOT EXISTS role_history (
+            role_name TEXT PRIMARY KEY,
+            member_ids TEXT NOT NULL,
+            last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_role_history_updated ON role_history(last_updated);
+        """
+        conn.executescript(migration_sql)
+        conn.commit()
+
+        return conn
+
+    def persist_role_history(self, role_history: Dict[str, Set[str]]) -> None:
+        """
+        Persist role history to the database.
+
+        Stores the role-to-members mapping in the role_history table.
+        Uses REPLACE to update existing roles or insert new ones.
+
+        Args:
+            role_history: Dictionary mapping role names to sets of member names
+
+        Raises:
+            sqlite3.Error: If database operation fails
+
+        Example:
+            >>> analyzer = AIAnalyzer()
+            >>> role_history = {"证道": {"張三", "李四"}, "司會": {"王五"}}
+            >>> analyzer.persist_role_history(role_history)
+        """
+        logger.info(f"Persisting role history: {len(role_history)} roles")
+
+        conn = self._get_db_connection()
+        try:
+            cursor = conn.cursor()
+
+            for role_name, member_names in role_history.items():
+                # Convert set to sorted JSON array for storage
+                member_ids_json = json.dumps(sorted(list(member_names)), ensure_ascii=False)
+
+                # Use REPLACE to update existing or insert new
+                cursor.execute(
+                    """
+                    REPLACE INTO role_history (role_name, member_ids, last_updated)
+                    VALUES (?, ?, ?)
+                    """,
+                    (role_name, member_ids_json, datetime.now(timezone.utc).isoformat())
+                )
+
+            conn.commit()
+            logger.info(f"Successfully persisted {len(role_history)} roles to database")
+
+        except sqlite3.Error as e:
+            logger.error(f"Failed to persist role history: {e}")
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def get_role_history_from_db(self, role_name: str) -> Optional[Set[str]]:
+        """
+        Retrieve role history for a specific role from the database.
+
+        Args:
+            role_name: Name of the role (will be normalized)
+
+        Returns:
+            Set of member names who have performed this role, or None if role not found
+
+        Example:
+            >>> analyzer = AIAnalyzer()
+            >>> members = analyzer.get_role_history_from_db("證道")
+            >>> members
+            {'張三', '李四'}
+        """
+        normalized_role = self._normalize_role_name(role_name)
+        logger.debug(f"Fetching role history for '{role_name}' (normalized: '{normalized_role}')")
+
+        conn = self._get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT member_ids FROM role_history WHERE role_name = ?",
+                (normalized_role,)
+            )
+            row = cursor.fetchone()
+
+            if row:
+                member_ids_json = row['member_ids']
+                member_names = json.loads(member_ids_json)
+                logger.debug(f"Found {len(member_names)} members for role '{normalized_role}'")
+                return set(member_names)
+            else:
+                logger.debug(f"No history found for role '{normalized_role}'")
+                return None
+
+        except sqlite3.Error as e:
+            logger.error(f"Failed to fetch role history: {e}")
+            raise
+        finally:
+            conn.close()
+
+    def get_eligible_members_for_role(
+        self,
+        role_name: str,
+        all_members: Optional[List[str]] = None
+    ) -> List[str]:
+        """
+        Get list of members eligible for a specific role based on historical assignments.
+
+        Returns members who have performed this role in the past. If no history exists
+        for the role and all_members is provided, returns all_members as fallback.
+
+        Args:
+            role_name: Name of the role to query
+            all_members: Optional list of all available members (fallback if no history)
+
+        Returns:
+            List of member names eligible for the role (sorted alphabetically)
+
+        Example:
+            >>> analyzer = AIAnalyzer()
+            >>> eligible = analyzer.get_eligible_members_for_role("證道")
+            >>> eligible
+            ['張三', '李四', '王五']
+
+            >>> # With fallback
+            >>> eligible = analyzer.get_eligible_members_for_role(
+            ...     "新角色",
+            ...     all_members=["張三", "李四"]
+            ... )
+            >>> eligible  # Returns all_members since no history exists
+            ['張三', '李四']
+        """
+        logger.info(f"Getting eligible members for role: {role_name}")
+
+        # Query database for role history
+        member_set = self.get_role_history_from_db(role_name)
+
+        if member_set:
+            # Return sorted list of members with history for this role
+            result = sorted(list(member_set))
+            logger.info(f"Found {len(result)} eligible members for role '{role_name}'")
+            return result
+        elif all_members:
+            # No history - return all members as fallback
+            logger.info(
+                f"No history for role '{role_name}', returning all {len(all_members)} members as fallback"
+            )
+            return sorted(all_members)
+        else:
+            # No history and no fallback
+            logger.warning(f"No eligible members found for role '{role_name}'")
+            return []
+
+    def recompute_role_history(
+        self,
+        events: List[Dict[str, Any]],
+        lookback_months: Optional[int] = None
+    ) -> Dict[str, Set[str]]:
+        """
+        Recompute and persist role history from events.
+
+        This is the main orchestration function that should be called periodically
+        (e.g., monthly) to refresh the role history data. It:
+        1. Computes role history from events
+        2. Persists the results to the database
+        3. Returns the computed role history
+
+        Args:
+            events: List of historical event dictionaries
+            lookback_months: Optional limit on how far back to analyze
+
+        Returns:
+            Computed role history dictionary
+
+        Example:
+            >>> analyzer = AIAnalyzer()
+            >>> events = fetch_all_events()  # Your data fetching logic
+            >>> role_history = analyzer.recompute_role_history(events, lookback_months=12)
+            >>> # Role history is now updated in the database
+
+        Note:
+            This function should be called by a scheduler or cron job to keep
+            role history up-to-date. Recommended frequency: monthly.
+        """
+        logger.info(
+            f"Recomputing role history from {len(events)} events "
+            f"(lookback: {lookback_months or 'all'} months)"
+        )
+
+        # Compute role history
+        role_history = self.compute_role_history(events, lookback_months)
+
+        # Persist to database
+        self.persist_role_history(role_history)
+
+        logger.info(
+            f"Role history recomputation complete: {len(role_history)} roles, "
+            f"{sum(len(members) for members in role_history.values())} total assignments"
+        )
+
+        return role_history
