@@ -4,8 +4,10 @@ Unit tests for AIAnalyzer
 
 import unittest
 from unittest.mock import Mock
-from datetime import date
+from datetime import date, timedelta
 from collections import Counter
+import tempfile
+import os
 
 from src.services.ai_analyzer import AIAnalyzer
 
@@ -400,6 +402,483 @@ class TestGenerateInsights(unittest.TestCase):
 
         # Should detect imbalance (>30% difference)
         self.assertTrue(any("imbalance" in insight.lower() for insight in insights))
+
+
+class TestRoleHistoryNormalization(unittest.TestCase):
+    """Test role name normalization"""
+
+    def test_normalize_role_name(self):
+        """Test role name normalization"""
+        self.assertEqual(AIAnalyzer._normalize_role_name("證道"), "證道")
+        self.assertEqual(AIAnalyzer._normalize_role_name("  證道  "), "證道")
+        self.assertEqual(AIAnalyzer._normalize_role_name("證道"), "證道")
+        self.assertEqual(AIAnalyzer._normalize_role_name("SPEAKER"), "speaker")
+
+    def test_normalize_role_name_empty(self):
+        """Test normalization of empty/None role names"""
+        self.assertEqual(AIAnalyzer._normalize_role_name(""), "")
+        self.assertEqual(AIAnalyzer._normalize_role_name("   "), "")
+        self.assertEqual(AIAnalyzer._normalize_role_name(None), "")
+
+
+class TestComputeRoleHistory(unittest.TestCase):
+    """Test compute_role_history method"""
+
+    def setUp(self):
+        """Set up test fixtures with temp database"""
+        self.temp_db = tempfile.NamedTemporaryFile(delete=False, suffix='.db')
+        self.temp_db.close()
+        self.analyzer = AIAnalyzer(db_path=self.temp_db.name)
+
+    def tearDown(self):
+        """Clean up temp database"""
+        if os.path.exists(self.temp_db.name):
+            os.unlink(self.temp_db.name)
+
+    def test_compute_role_history_basic(self):
+        """Test basic role history computation"""
+        events = [
+            {
+                "date": "2024-01-01",
+                "members": [
+                    {"name": "張三", "role": "證道"},
+                    {"name": "李四", "role": "司會"}
+                ]
+            },
+            {
+                "date": "2024-01-08",
+                "members": [
+                    {"name": "張三", "role": "證道"},
+                    {"name": "王五", "role": "司會"}
+                ]
+            }
+        ]
+
+        role_history = self.analyzer.compute_role_history(events)
+
+        # Check normalized role names
+        self.assertIn("證道", role_history)
+        self.assertIn("司會", role_history)
+
+        # Check member sets
+        self.assertEqual(role_history["證道"], {"張三"})
+        self.assertEqual(role_history["司會"], {"李四", "王五"})
+
+    def test_compute_role_history_repeated_assignments(self):
+        """Test that repeated assignments don't duplicate members"""
+        events = [
+            {
+                "date": "2024-01-01",
+                "members": [{"name": "張三", "role": "證道"}]
+            },
+            {
+                "date": "2024-01-08",
+                "members": [{"name": "張三", "role": "證道"}]
+            },
+            {
+                "date": "2024-01-15",
+                "members": [{"name": "張三", "role": "證道"}]
+            }
+        ]
+
+        role_history = self.analyzer.compute_role_history(events)
+
+        # 張三 should appear only once despite multiple assignments
+        self.assertEqual(role_history["證道"], {"張三"})
+        self.assertEqual(len(role_history["證道"]), 1)
+
+    def test_compute_role_history_case_normalization(self):
+        """Test that role names are normalized (case-insensitive)"""
+        events = [
+            {
+                "date": "2024-01-01",
+                "members": [{"name": "張三", "role": "Speaker"}]
+            },
+            {
+                "date": "2024-01-08",
+                "members": [{"name": "李四", "role": "SPEAKER"}]
+            },
+            {
+                "date": "2024-01-15",
+                "members": [{"name": "王五", "role": "speaker"}]
+            }
+        ]
+
+        role_history = self.analyzer.compute_role_history(events)
+
+        # All variations should be normalized to "speaker"
+        self.assertIn("speaker", role_history)
+        self.assertEqual(role_history["speaker"], {"張三", "李四", "王五"})
+
+    def test_compute_role_history_whitespace_normalization(self):
+        """Test that whitespace is trimmed from role names"""
+        events = [
+            {
+                "date": "2024-01-01",
+                "members": [{"name": "張三", "role": "  證道  "}]
+            }
+        ]
+
+        role_history = self.analyzer.compute_role_history(events)
+
+        # Should be normalized without whitespace
+        self.assertIn("證道", role_history)
+
+    def test_compute_role_history_missing_role(self):
+        """Test handling of missing role fields"""
+        events = [
+            {
+                "date": "2024-01-01",
+                "members": [
+                    {"name": "張三", "role": "證道"},
+                    {"name": "李四"}  # Missing role
+                ]
+            }
+        ]
+
+        role_history = self.analyzer.compute_role_history(events)
+
+        # Should only include 張三
+        self.assertEqual(role_history["證道"], {"張三"})
+
+    def test_compute_role_history_missing_name(self):
+        """Test handling of missing name fields"""
+        events = [
+            {
+                "date": "2024-01-01",
+                "members": [
+                    {"name": "張三", "role": "證道"},
+                    {"role": "司會"}  # Missing name
+                ]
+            }
+        ]
+
+        role_history = self.analyzer.compute_role_history(events)
+
+        # Should only include 張三
+        self.assertEqual(role_history["證道"], {"張三"})
+        self.assertNotIn("司會", role_history)
+
+    def test_compute_role_history_empty_events(self):
+        """Test with empty event list"""
+        events = []
+
+        role_history = self.analyzer.compute_role_history(events)
+
+        self.assertEqual(role_history, {})
+
+    def test_compute_role_history_with_lookback(self):
+        """Test role history computation with lookback window"""
+        today = date.today()
+        old_date = (today - timedelta(days=400)).isoformat()
+        recent_date = (today - timedelta(days=30)).isoformat()
+
+        events = [
+            {
+                "date": old_date,
+                "members": [{"name": "張三", "role": "證道"}]
+            },
+            {
+                "date": recent_date,
+                "members": [{"name": "李四", "role": "證道"}]
+            }
+        ]
+
+        # With 12-month lookback, should only include recent event
+        role_history = self.analyzer.compute_role_history(events, lookback_months=12)
+
+        # Should only include 李四 (recent), not 張三 (old)
+        self.assertEqual(role_history["證道"], {"李四"})
+
+    def test_compute_role_history_invalid_date_format(self):
+        """Test handling of invalid date formats"""
+        today = date.today()
+        recent_date = (today - timedelta(days=30)).isoformat()
+
+        events = [
+            {
+                "date": "invalid-date",
+                "members": [{"name": "張三", "role": "證道"}]
+            },
+            {
+                "date": recent_date,
+                "members": [{"name": "李四", "role": "證道"}]
+            }
+        ]
+
+        role_history = self.analyzer.compute_role_history(events, lookback_months=12)
+
+        # Should skip invalid date event but process valid one
+        self.assertIn("證道", role_history)
+        self.assertEqual(role_history["證道"], {"李四"})
+
+
+class TestPersistRoleHistory(unittest.TestCase):
+    """Test persist_role_history and database operations"""
+
+    def setUp(self):
+        """Set up test fixtures with temp database"""
+        self.temp_db = tempfile.NamedTemporaryFile(delete=False, suffix='.db')
+        self.temp_db.close()
+        self.analyzer = AIAnalyzer(db_path=self.temp_db.name)
+
+    def tearDown(self):
+        """Clean up temp database"""
+        if os.path.exists(self.temp_db.name):
+            os.unlink(self.temp_db.name)
+
+    def test_persist_role_history_basic(self):
+        """Test basic persistence of role history"""
+        role_history = {
+            "證道": {"張三", "李四"},
+            "司會": {"王五"}
+        }
+
+        # Should not raise exception
+        self.analyzer.persist_role_history(role_history)
+
+        # Verify data was persisted
+        result = self.analyzer.get_role_history_from_db("證道")
+        self.assertEqual(result, {"張三", "李四"})
+
+    def test_persist_role_history_update(self):
+        """Test updating existing role history"""
+        # Initial data
+        role_history_v1 = {
+            "證道": {"張三"}
+        }
+        self.analyzer.persist_role_history(role_history_v1)
+
+        # Updated data
+        role_history_v2 = {
+            "證道": {"張三", "李四", "王五"}
+        }
+        self.analyzer.persist_role_history(role_history_v2)
+
+        # Should have updated data
+        result = self.analyzer.get_role_history_from_db("證道")
+        self.assertEqual(result, {"張三", "李四", "王五"})
+
+    def test_persist_role_history_empty(self):
+        """Test persisting empty role history"""
+        role_history = {}
+
+        # Should not raise exception
+        self.analyzer.persist_role_history(role_history)
+
+    def test_persist_role_history_unicode(self):
+        """Test persisting Unicode characters (Chinese names)"""
+        role_history = {
+            "證道": {"張三", "李四", "王五"},
+            "司會": {"趙六", "孫七"}
+        }
+
+        self.analyzer.persist_role_history(role_history)
+
+        # Verify Unicode data is preserved
+        result = self.analyzer.get_role_history_from_db("證道")
+        self.assertEqual(result, {"張三", "李四", "王五"})
+
+
+class TestGetRoleHistoryFromDB(unittest.TestCase):
+    """Test get_role_history_from_db method"""
+
+    def setUp(self):
+        """Set up test fixtures with temp database"""
+        self.temp_db = tempfile.NamedTemporaryFile(delete=False, suffix='.db')
+        self.temp_db.close()
+        self.analyzer = AIAnalyzer(db_path=self.temp_db.name)
+
+        # Populate with test data
+        role_history = {
+            "證道": {"張三", "李四"},
+            "司會": {"王五"}
+        }
+        self.analyzer.persist_role_history(role_history)
+
+    def tearDown(self):
+        """Clean up temp database"""
+        if os.path.exists(self.temp_db.name):
+            os.unlink(self.temp_db.name)
+
+    def test_get_role_history_existing_role(self):
+        """Test retrieving existing role history"""
+        result = self.analyzer.get_role_history_from_db("證道")
+        self.assertEqual(result, {"張三", "李四"})
+
+    def test_get_role_history_nonexistent_role(self):
+        """Test retrieving non-existent role"""
+        result = self.analyzer.get_role_history_from_db("翻譯")
+        self.assertIsNone(result)
+
+    def test_get_role_history_case_normalization(self):
+        """Test that role lookups are case-insensitive"""
+        # Store with lowercase
+        self.analyzer.persist_role_history({"speaker": {"John", "Jane"}})
+
+        # Retrieve with different casing
+        result = self.analyzer.get_role_history_from_db("SPEAKER")
+        self.assertEqual(result, {"John", "Jane"})
+
+
+class TestGetEligibleMembersForRole(unittest.TestCase):
+    """Test get_eligible_members_for_role method"""
+
+    def setUp(self):
+        """Set up test fixtures with temp database"""
+        self.temp_db = tempfile.NamedTemporaryFile(delete=False, suffix='.db')
+        self.temp_db.close()
+        self.analyzer = AIAnalyzer(db_path=self.temp_db.name)
+
+        # Populate with test data
+        role_history = {
+            "證道": {"張三", "李四", "王五"},
+            "司會": {"李四", "趙六"}
+        }
+        self.analyzer.persist_role_history(role_history)
+
+    def tearDown(self):
+        """Clean up temp database"""
+        if os.path.exists(self.temp_db.name):
+            os.unlink(self.temp_db.name)
+
+    def test_get_eligible_members_existing_role(self):
+        """Test getting eligible members for existing role"""
+        result = self.analyzer.get_eligible_members_for_role("證道")
+
+        # Should return sorted list
+        self.assertIsInstance(result, list)
+        self.assertEqual(set(result), {"張三", "李四", "王五"})
+        self.assertEqual(result, sorted(result))
+
+    def test_get_eligible_members_no_history_with_fallback(self):
+        """Test fallback to all_members when no history exists"""
+        all_members = ["張三", "李四", "王五", "趙六"]
+        result = self.analyzer.get_eligible_members_for_role(
+            "翻譯",  # Role with no history
+            all_members=all_members
+        )
+
+        # Should return all_members sorted
+        self.assertEqual(result, sorted(all_members))
+
+    def test_get_eligible_members_no_history_no_fallback(self):
+        """Test behavior when no history and no fallback"""
+        result = self.analyzer.get_eligible_members_for_role("翻譯")
+
+        # Should return empty list
+        self.assertEqual(result, [])
+
+    def test_get_eligible_members_returns_sorted(self):
+        """Test that results are always sorted alphabetically"""
+        result = self.analyzer.get_eligible_members_for_role("證道")
+
+        # Check it's sorted
+        self.assertEqual(result, sorted(result))
+
+
+class TestRecomputeRoleHistory(unittest.TestCase):
+    """Test recompute_role_history orchestration method"""
+
+    def setUp(self):
+        """Set up test fixtures with temp database"""
+        self.temp_db = tempfile.NamedTemporaryFile(delete=False, suffix='.db')
+        self.temp_db.close()
+        self.analyzer = AIAnalyzer(db_path=self.temp_db.name)
+
+    def tearDown(self):
+        """Clean up temp database"""
+        if os.path.exists(self.temp_db.name):
+            os.unlink(self.temp_db.name)
+
+    def test_recompute_role_history_end_to_end(self):
+        """Test complete recomputation workflow"""
+        events = [
+            {
+                "date": "2024-01-01",
+                "members": [
+                    {"name": "張三", "role": "證道"},
+                    {"name": "李四", "role": "司會"}
+                ]
+            },
+            {
+                "date": "2024-01-08",
+                "members": [
+                    {"name": "王五", "role": "證道"},
+                    {"name": "李四", "role": "司會"}
+                ]
+            }
+        ]
+
+        # Recompute and persist
+        result = self.analyzer.recompute_role_history(events)
+
+        # Check returned data
+        self.assertIn("證道", result)
+        self.assertEqual(result["證道"], {"張三", "王五"})
+
+        # Verify data was persisted to database
+        db_result = self.analyzer.get_role_history_from_db("證道")
+        self.assertEqual(db_result, {"張三", "王五"})
+
+    def test_recompute_role_history_with_lookback(self):
+        """Test recomputation with lookback window"""
+        today = date.today()
+        old_date = (today - timedelta(days=400)).isoformat()
+        recent_date = (today - timedelta(days=30)).isoformat()
+
+        events = [
+            {
+                "date": old_date,
+                "members": [{"name": "張三", "role": "證道"}]
+            },
+            {
+                "date": recent_date,
+                "members": [{"name": "李四", "role": "證道"}]
+            }
+        ]
+
+        # Recompute with 12-month lookback
+        result = self.analyzer.recompute_role_history(events, lookback_months=12)
+
+        # Should only include recent data
+        self.assertEqual(result["證道"], {"李四"})
+
+        # Verify in database
+        db_result = self.analyzer.get_role_history_from_db("證道")
+        self.assertEqual(db_result, {"李四"})
+
+    def test_recompute_role_history_updates_existing(self):
+        """Test that recomputation updates existing data"""
+        # Initial computation
+        events_v1 = [
+            {
+                "date": "2024-01-01",
+                "members": [{"name": "張三", "role": "證道"}]
+            }
+        ]
+        self.analyzer.recompute_role_history(events_v1)
+
+        # Verify initial state
+        result = self.analyzer.get_role_history_from_db("證道")
+        self.assertEqual(result, {"張三"})
+
+        # Recompute with new data
+        events_v2 = [
+            {
+                "date": "2024-01-01",
+                "members": [{"name": "張三", "role": "證道"}]
+            },
+            {
+                "date": "2024-01-08",
+                "members": [{"name": "李四", "role": "證道"}]
+            }
+        ]
+        self.analyzer.recompute_role_history(events_v2)
+
+        # Verify updated state
+        result = self.analyzer.get_role_history_from_db("證道")
+        self.assertEqual(result, {"張三", "李四"})
 
 
 if __name__ == "__main__":
