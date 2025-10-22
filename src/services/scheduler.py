@@ -8,6 +8,11 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from .json_file_writer import JsonFileWriter
+from datetime import datetime
+
+from .ai_agent import AIAgent
+from .ai_analyzer import AIAnalyzer
+from .roster_api_client import RosterAPIClient
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +39,16 @@ class SchedulerService:
         self.settings = settings
         self.is_running = False
         self.json_writer = json_writer
+
+        # Initialize API client and AI components
+        self.api_client = RosterAPIClient(
+            base_url=settings.api_base_url, api_key=settings.api_key
+        )
+        self.ai_analyzer = AIAnalyzer()
+
+        # Initialize AI Agent
+        self.ai_agent = AIAgent(api_client=self.api_client)
+
         # TODO: Initialize scheduler (e.g., APScheduler, cron)
 
     def start(self):
@@ -74,7 +89,7 @@ class SchedulerService:
 
         Args:
             orchestrator: Optional RosterOrchestrator instance.
-                         If None, must be configured in settings.
+                         If None, falls back to AI Agent execution.
         """
         logger.info("Starting roster generation task")
 
@@ -111,8 +126,8 @@ class SchedulerService:
             #     self._submit_rosters(result['rosters'])
 
         except Exception as e:
-            logger.error(f"Roster generation failed: {e}")
-            # TODO: Handle errors and potentially retry
+            logger.error(f"Roster generation failed: {e}", exc_info=True)
+            raise
 
     def _write_roster_to_disk(self, roster_data: dict) -> Optional[Path]:
         """
