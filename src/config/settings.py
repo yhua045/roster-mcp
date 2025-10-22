@@ -38,6 +38,9 @@ class Settings:
     dry_run_mode: bool = os.getenv("DRY_RUN", "false").lower() == "true"
     auto_approve_rosters: bool = os.getenv("AUTO_APPROVE", "false").lower() == "true"
 
+    # Roster Output Configuration
+    write_roster_json: bool = os.getenv("WRITE_ROSTER_JSON", "true").lower() == "true"
+    roster_output_dir: str = os.getenv("ROSTER_OUTPUT_DIR", "roster-json")
     # AI Agent Configuration
     historical_months: int = int(os.getenv("HISTORICAL_MONTHS", "3"))
     future_months: int = int(os.getenv("FUTURE_MONTHS", "3"))

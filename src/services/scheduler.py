@@ -3,6 +3,11 @@ Scheduling service for running roster generation at regular intervals
 """
 
 import logging
+from typing import Optional
+from datetime import datetime, timedelta
+from pathlib import Path
+
+from .json_file_writer import JsonFileWriter
 from datetime import datetime
 
 from .ai_agent import AIAgent
@@ -22,15 +27,18 @@ class SchedulerService:
     - Error handling and retries
     """
 
-    def __init__(self, settings):
+    def __init__(self, settings, json_writer: Optional[JsonFileWriter] = None):
         """
         Initialize the scheduler service
 
         Args:
             settings: Application settings/configuration
+            json_writer: Optional JsonFileWriter instance for dependency injection.
+                        If None and write_roster_json is enabled, creates one on-demand.
         """
         self.settings = settings
         self.is_running = False
+        self.json_writer = json_writer
 
         # Initialize API client and AI components
         self.api_client = RosterAPIClient(
@@ -76,7 +84,8 @@ class SchedulerService:
         2. Analyzes patterns
         3. Generates recommendations
         4. Validates generated roster
-        5. (Future) Submits new rosters
+        5. Writes roster to disk (if enabled)
+        6. (Future) Submits new rosters
 
         Args:
             orchestrator: Optional RosterOrchestrator instance.
@@ -108,6 +117,10 @@ class SchedulerService:
                     f"Validation errors: {result['validation']['errors']}"
                 )
 
+            # Write roster to disk if enabled
+            if self.settings.write_roster_json:
+                self._write_roster_to_disk(result)
+
             # TODO: Submit to API if validation passed
             # if result['validation']['is_valid']:
             #     self._submit_rosters(result['rosters'])
@@ -115,6 +128,35 @@ class SchedulerService:
         except Exception as e:
             logger.error(f"Roster generation failed: {e}", exc_info=True)
             raise
+
+    def _write_roster_to_disk(self, roster_data: dict) -> Optional[Path]:
+        """
+        Write roster data to disk using JsonFileWriter.
+
+        Args:
+            roster_data: Dictionary containing roster generation output
+
+        Returns:
+            Path to written file, or None if write failed
+        """
+        try:
+            # Create writer on-demand if not provided via dependency injection
+            if self.json_writer is None:
+                self.json_writer = JsonFileWriter()
+
+            # Write roster data
+            file_path = self.json_writer.write(
+                roster_data,
+                timestamp=datetime.now()
+            )
+
+            logger.info(f"Roster data written to: {file_path}")
+            return file_path
+
+        except Exception as e:
+            logger.error(f"Failed to write roster to disk: {e}")
+            # Don't crash scheduler - log error and continue
+            return None
 
     def schedule_one_time_task(self, run_at: datetime, task_name: str):
         """
