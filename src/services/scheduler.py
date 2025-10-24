@@ -8,11 +8,9 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from .json_file_writer import JsonFileWriter
-from datetime import datetime
-
-from .ai_agent import AIAgent
 from .ai_analyzer import AIAnalyzer
 from .roster_api_client import RosterAPIClient
+from .ai_api_client import AIAPIClient
 
 logger = logging.getLogger(__name__)
 
@@ -40,14 +38,22 @@ class SchedulerService:
         self.is_running = False
         self.json_writer = json_writer
 
-        # Initialize API client and AI components
+        # Initialize Roster API client
         self.api_client = RosterAPIClient(
             base_url=settings.api_base_url, api_key=settings.api_key
         )
-        self.ai_analyzer = AIAnalyzer()
 
-        # Initialize AI Agent
-        self.ai_agent = AIAgent(api_client=self.api_client)
+        # Initialize AI API client (if AI API key is provided)
+        ai_client = None
+        if settings.ai_api_key:
+            ai_client = AIAPIClient(
+                base_url=settings.ai_api_base_url,
+                api_key=settings.ai_api_key
+            )
+            logger.info(f"AI API client initialized: {settings.ai_api_base_url}")
+
+        # Initialize AI analyzer with AI client
+        self.ai_analyzer = AIAnalyzer(ai_client=ai_client)
 
         # TODO: Initialize scheduler (e.g., APScheduler, cron)
 

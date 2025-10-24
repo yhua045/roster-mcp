@@ -6,13 +6,16 @@ and generation of roster recommendations. It does NOT fetch data from APIs -
 it receives prepared data and performs analysis.
 """
 
-from typing import List, Dict, Any, Optional, Set
+from typing import List, Dict, Any, Optional, Set, TYPE_CHECKING
 from datetime import date, timedelta, datetime, timezone
 from collections import defaultdict, Counter
 import logging
 import sqlite3
 import json
 import os
+
+if TYPE_CHECKING:
+    from .ai_api_client import AIAPIClient
 
 logger = logging.getLogger(__name__)
 
@@ -31,12 +34,12 @@ class AIAnalyzer:
     - Handle data gathering or availability evaluation
     """
 
-    def __init__(self, ai_client: Optional[Any] = None, db_path: Optional[str] = None):
+    def __init__(self, ai_client: Optional['AIAPIClient'] = None, db_path: Optional[str] = None):
         """
         Initialize the AI analyzer.
 
         Args:
-            ai_client: Optional AI client (e.g., OpenAI, Claude API client)
+            ai_client: Optional AIAPIClient for LLM-based roster generation.
                       If None, uses rule-based analysis
             db_path: Optional path to SQLite database file for role history persistence.
                     If None, uses 'roster.db' in current directory.
