@@ -25,6 +25,7 @@ class Settings:
 
     # AI Configuration
     ai_model: str = os.getenv("AI_MODEL", "gpt-3.5-turbo")
+    ai_api_base_url: str = os.getenv("AI_API_BASE_URL", "https://api.openai.com/v1")
     ai_api_key: Optional[str] = os.getenv("AI_API_KEY")
 
     # Database Configuration (if needed)
